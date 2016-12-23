@@ -2,11 +2,17 @@ local vanilla_lfs = require('lfs')
 local lfs = require('./lfs_ffi')
 
 
+local eq = assert.are.same
+local is_nil = assert.is_nil
+local is_not_nil = assert.is_not_nil
+local is_true = assert.is_true
+local has_error = assert.has_error
+
 describe('lfs', function()
     describe('attributes', function()
         it('without argument', function()
             local info = lfs.attributes('.')
-            assert.are.same(vanilla_lfs.attributes('.'), info)
+            eq(vanilla_lfs.attributes('.'), info)
         end)
 
         it('with attribute name', function()
@@ -29,21 +35,49 @@ describe('lfs', function()
             for i = 1, #names do
                 local attr = names[i]
                 local info = lfs.attributes('.', attr)
-                assert.are.same(
-                    vanilla_lfs.attributes('.', attr), info, attr..' is not equal')
+                eq(vanilla_lfs.attributes('.', attr), info,
+                   attr..' is not equal')
             end
         end)
 
         it('with attributes table', function()
             local tab = {"table", "for", "attributes"}
             local info = lfs.attributes('.', tab)
-            assert.are.same(vanilla_lfs.attributes('.', tab), info)
+            eq(vanilla_lfs.attributes('.', tab), info)
         end)
 
         it('with nonexisted file', function()
             local info, err = lfs.attributes('nonexisted')
-            assert.is_nil(info)
-            assert.are.same('No such file or directory', err)
+            is_nil(info)
+            eq('No such file or directory', err)
+        end)
+    end)
+
+    describe('symlinkattributes', function()
+        local symlink = 'lfs_ffi.lua.link'
+
+        it('link failed', function()
+            local res, err = lfs.link('xxx', symlink)
+            is_nil(res)
+            eq(err, 'No such file or directory')
+        end)
+
+        it('hard link', function()
+            local _, err = lfs.link('lfs_ffi.lua', symlink)
+            is_nil(err)
+            eq(vanilla_lfs.attributes(symlink, 'mode'), 'file')
+            eq(vanilla_lfs.symlinkattributes(symlink, 'mode'), 'file')
+        end)
+
+        it('soft link', function()
+            local _, err = lfs.link('lfs_ffi.lua', symlink, true)
+            is_nil(err)
+            eq(vanilla_lfs.attributes(symlink, 'mode'), 'file')
+            eq(vanilla_lfs.symlinkattributes(symlink, 'mode'), 'link')
+        end)
+
+        after_each(function()
+            os.remove(symlink)
         end)
     end)
 
@@ -54,12 +88,12 @@ describe('lfs', function()
 
         it('return err if mkdir failed', function()
             local res, err = lfs.mkdir('test')
-            assert.is_nil(res)
-            assert.are.same('File exists', err)
+            is_nil(res)
+            eq('File exists', err)
         end)
 
         it('raise error if open dir failed', function()
-            assert.has_error(function() lfs.dir('nonexisted') end,
+            has_error(function() lfs.dir('nonexisted') end,
                 "cannot open nonexisted : No such file or directory")
         end)
 
@@ -71,8 +105,8 @@ describe('lfs', function()
                 if not name then break end
                 names[#names + 1] = name
             end
-            assert.are.same({'..', '.'}, names)
-            assert.is_true(dir_obj.closed)
+            eq({'..', '.'}, names)
+            is_true(dir_obj.closed)
         end)
 
         it('iterate dir via iterator', function()
@@ -83,27 +117,27 @@ describe('lfs', function()
                 if not name then break end
                 names[#names + 1] = name
             end
-            assert.are.same({'..', '.'}, names)
-            assert.is_true(dir_obj.closed)
+            eq({'..', '.'}, names)
+            is_true(dir_obj.closed)
         end)
 
         it('close', function()
             local _, dir_obj = lfs.dir('.')
             dir_obj:close()
-            assert.has_error(function() dir_obj:next() end, "closed directory")
+            has_error(function() dir_obj:next() end, "closed directory")
         end)
 
         it('chdir and currentdir', function()
             lfs.chdir('test')
             local cur_dir = lfs.currentdir()
             lfs.chdir('..')
-            assert.is_not_nil(cur_dir:find('test$'))
+            is_not_nil(cur_dir:find('test$'))
         end)
 
         it('return err if chdir failed', function()
             local res, err = lfs.chdir('nonexisted')
-            assert.is_nil(res)
-            assert.are.same('No such file or directory', err)
+            is_nil(res)
+            eq('No such file or directory', err)
         end)
 
         it('rmdir', function()
@@ -112,8 +146,40 @@ describe('lfs', function()
 
         it('return err if rmdir failed', function()
             local res, err = lfs.rmdir('test')
-            assert.is_nil(res)
-            assert.are.same('No such file or directory', err)
+            is_nil(res)
+            eq('No such file or directory', err)
+        end)
+    end)
+
+    describe('touch', function()
+        local touched = 'temp'
+
+        before_each(function()
+            local f = io.open(touched, 'w')
+            f:write('a')
+            f:close()
+        end)
+
+        after_each(function()
+            os.remove(touched)
+        end)
+
+        it('touch failed', function()
+            local _, err = lfs.touch('nonexisted', 1)
+            eq('No such file or directory', err)
+        end)
+
+        it('set atime', function()
+            local _, err = lfs.touch(touched, 1)
+            is_nil(err)
+            eq(vanilla_lfs.attributes(touched, 'access'), 1)
+        end)
+
+        it('set both atime and mtime', function()
+            local _, err = lfs.touch(touched, 1, 2)
+            is_nil(err)
+            eq(vanilla_lfs.attributes(touched, 'access'), 1)
+            eq(vanilla_lfs.attributes(touched, 'modification'), 2)
         end)
     end)
 end)
