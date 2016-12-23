@@ -14,7 +14,7 @@ local _M = {
     _VERSION = "0.1",
 }
 
-local is_64bits = ffi.abi('64bit')
+local IS_64_BIT = ffi.abi('64bit')
 
 ffi.cdef([[
     char* strerror(int errnum);
@@ -24,8 +24,10 @@ local function errno()
     return ffi_str(lib.strerror(ffi.errno()))
 end
 
-if ffi.os ~= "Windows" then
-    -- TODO
+local OS = ffi.os
+if OS == "Windows" then
+    error("TODO support Windows")
+else
     local MAXPATH = 4096
 
     ffi.cdef([[
@@ -60,44 +62,178 @@ if ffi.os ~= "Windows" then
         DIR *opendir(const char *name);
         struct dirent *readdir(DIR *dirp);
         int closedir(DIR *dirp);
-
-        // Linux Only
-        typedef uint64_t dev_t;
-        typedef uint64_t nlink_t;
-        typedef unsigned int gid_t;
-        typedef unsigned int uid_t;
-        typedef size_t blksize_t;
-        typedef size_t blkcnt_t;
-        struct stat {
-            dev_t           st_dev;
-            ino_t           st_ino;
-            nlink_t         st_nlink;
-            mode_t          st_mode;
-            uid_t           st_uid;
-            gid_t           st_gid;
-            uint32_t        __pad0;
-            dev_t           st_rdev;
-            off_t           st_size;
-            blksize_t       st_blksize;
-            blkcnt_t        st_blocks;
-            time_t          st_atime;
-            time_t          st_atime_nsec;
-            time_t          st_mtime;
-            time_t          st_mtime_nsec;
-            time_t          st_ctime;
-            time_t          st_ctime_nsec;
-            int64_t         __unused[3];
-        };
         long syscall(int number, ...);
     ]])
 
-    local stat_syscall_num
-    if is_64bits then
-        stat_syscall_num = 4 -- x64
+    local stat_func
+    if OS == 'Linux' then
+        local ARCH = ffi.arch
+        -- Taken from justincormack/ljsyscall
+        local stat_syscall_num
+        if ARCH == 'x64' then
+            ffi.cdef([[
+                struct stat {
+                    unsigned long   st_dev;
+                    unsigned long   st_ino;
+                    unsigned long   st_nlink;
+                    unsigned int    st_mode;
+                    unsigned int    st_uid;
+                    unsigned int    st_gid;
+                    unsigned int    __pad0;
+                    unsigned long   st_rdev;
+                    long            st_size;
+                    long            st_blksize;
+                    long            st_blocks;
+                    unsigned long   st_atime;
+                    unsigned long   st_atime_nsec;
+                    unsigned long   st_mtime;
+                    unsigned long   st_mtime_nsec;
+                    unsigned long   st_ctime;
+                    unsigned long   st_ctime_nsec;
+                    long            __unused[3];
+                };
+            ]])
+            stat_syscall_num = 4
+        elseif ARCH == 'x86' then
+            ffi.cdef([[
+                struct stat {
+                    unsigned long long      st_dev;
+                    unsigned char   __pad0[4];
+                    unsigned long   __st_ino;
+                    unsigned int    st_mode;
+                    unsigned int    st_nlink;
+                    unsigned long   st_uid;
+                    unsigned long   st_gid;
+                    unsigned long long      st_rdev;
+                    unsigned char   __pad3[4];
+                    long long       st_size;
+                    unsigned long   st_blksize;
+                    unsigned long long      st_blocks;
+                    unsigned long   st_atime;
+                    unsigned long   st_atime_nsec;
+                    unsigned long   st_mtime;
+                    unsigned int    st_mtime_nsec;
+                    unsigned long   st_ctime;
+                    unsigned long   st_ctime_nsec;
+                    unsigned long long      st_ino;
+                };
+            ]])
+            stat_syscall_num = IS_64_BIT and 106 or 195
+        elseif ARCH == 'arm' then
+            if IS_64_BIT then
+                ffi.cdef([[
+                    struct stat {
+                        unsigned long   st_dev;
+                        unsigned long   st_ino;
+                        unsigned int    st_mode;
+                        unsigned int    st_nlink;
+                        unsigned int    st_uid;
+                        unsigned int    st_gid;
+                        unsigned long   st_rdev;
+                        unsigned long   __pad1;
+                        long            st_size;
+                        int             st_blksize;
+                        int             __pad2;
+                        long            st_blocks;
+                        long            st_atime;
+                        unsigned long   st_atime_nsec;
+                        long            st_mtime;
+                        unsigned long   st_mtime_nsec;
+                        long            st_ctime;
+                        unsigned long   st_ctime_nsec;
+                        unsigned int    __unused4;
+                        unsigned int    __unused5;
+                    };
+                ]])
+                stat_syscall_num = 106
+            else
+                ffi.cdef([[
+                    struct stat {
+                        unsigned long long      st_dev;
+                        unsigned char   __pad0[4];
+                        unsigned long   __st_ino;
+                        unsigned int    st_mode;
+                        unsigned int    st_nlink;
+                        unsigned long   st_uid;
+                        unsigned long   st_gid;
+                        unsigned long long      st_rdev;
+                        unsigned char   __pad3[4];
+                        long long       st_size;
+                        unsigned long   st_blksize;
+                        unsigned long long      st_blocks;
+                        unsigned long   st_atime;
+                        unsigned long   st_atime_nsec;
+                        unsigned long   st_mtime;
+                        unsigned int    st_mtime_nsec;
+                        unsigned long   st_ctime;
+                        unsigned long   st_ctime_nsec;
+                        unsigned long long      st_ino;
+                    };
+                ]])
+                stat_syscall_num = 195
+            end
+        elseif ARCH == 'ppc' or ARCH == 'ppcspe' then
+                ffi.cdef([[
+                    struct stat {
+                        unsigned long long st_dev;
+                        unsigned long long st_ino;
+                        unsigned int    st_mode;
+                        unsigned int    st_nlink;
+                        unsigned int    st_uid;
+                        unsigned int    st_gid;
+                        unsigned long long st_rdev;
+                        unsigned long long __pad1;
+                        long long       st_size;
+                        int             st_blksize;
+                        int             __pad2;
+                        long long       st_blocks;
+                        int             st_atime;
+                        unsigned int    st_atime_nsec;
+                        int             st_mtime;
+                        unsigned int    st_mtime_nsec;
+                        int             st_ctime;
+                        unsigned int    st_ctime_nsec;
+                        unsigned int    __unused4;
+                        unsigned int    __unused5;
+                    };
+                ]])
+                stat_syscall_num = IS_64_BIT and 106 or 195
+        elseif ARCH == 'mips' or ARCH == 'mipsel' then
+                ffi.cdef([[
+                    struct stat {
+                        unsigned long   st_dev;
+                        unsigned long   __st_pad0[3];
+                        unsigned long long      st_ino;
+                        mode_t          st_mode;
+                        nlink_t         st_nlink;
+                        uid_t           st_uid;
+                        gid_t           st_gid;
+                        unsigned long   st_rdev;
+                        unsigned long   __st_pad1[3];
+                        long long       st_size;
+                        time_t          st_atime;
+                        unsigned long   st_atime_nsec;
+                        time_t          st_mtime;
+                        unsigned long   st_mtime_nsec;
+                        time_t          st_ctime;
+                        unsigned long   st_ctime_nsec;
+                        unsigned long   st_blksize;
+                        unsigned long   __st_pad2;
+                        long long       st_blocks;
+                        long __st_padding4[14];
+                    };
+                ]])
+                stat_syscall_num = IS_64_BIT and 4106 or 4213
+        else
+            error("TODO support other architectures")
+        end
+
+        stat_func = function(filepath, buf)
+            return lib.syscall(stat_syscall_num, filepath, buf)
+        end
     else
-        stat_syscall_num = 106 -- x86
+        error('TODO support other posix os')
     end
-    -- TODO support other architectures
 
     local STAT = {
         FMT   = 0xF000,
@@ -159,15 +295,15 @@ if ffi.os ~= "Windows" then
 
     local mt = {
         __index = function(self, attr_name)
-           local func = attr_handlers[attr_name]
-           return func and func(self)
+        local func = attr_handlers[attr_name]
+        return func and func(self)
         end
     }
     local stat_type = ffi.metatype('struct stat', mt)
 
     function _M.attributes(filepath, attr)
         local buf = ffi.new(stat_type)
-        if lib.syscall(stat_syscall_num, filepath, buf) == -1 then
+        if stat_func(filepath, buf) == -1 then
             return nil, errno()
         end
 
