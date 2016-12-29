@@ -105,7 +105,8 @@ describe('lfs', function()
                 if not name then break end
                 names[#names + 1] = name
             end
-            eq({'..', '.'}, names)
+            table.sort(names)
+            eq({'.', '..'}, names)
             is_true(dir_obj.closed)
         end)
 
@@ -117,7 +118,8 @@ describe('lfs', function()
                 if not name then break end
                 names[#names + 1] = name
             end
-            eq({'..', '.'}, names)
+            table.sort(names)
+            eq({'.', '..'}, names)
             is_true(dir_obj.closed)
         end)
 
