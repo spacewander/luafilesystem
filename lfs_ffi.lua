@@ -1,4 +1,3 @@
-require 'table.new'
 local bit = require "bit"
 local ffi = require "ffi"
 
@@ -8,7 +7,11 @@ local rshift = bit.rshift
 local lib = ffi.C
 local ffi_str = ffi.string
 local concat = table.concat
-local new_tab = table.new
+local ok, new_tab = pcall(require, "table.new")
+if not ok or type(new_tab) ~= "function" then
+    new_tab = function () return {} end
+end
+
 
 local _M = {
     _VERSION = "0.1",
@@ -49,7 +52,7 @@ else
         typedef struct  __dirstream DIR;
 
         typedef size_t off_t;
-        typedef ssize_t ino_t;
+        typedef int64_t ino_t;
 
         struct dirent {
             ino_t           d_ino;
