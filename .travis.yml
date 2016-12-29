@@ -1,0 +1,21 @@
+language: python
+sudo: false
+
+env:
+  - LUA="lua 5.1"
+  - LUA="luajit 2.1"
+
+before_install:
+  - pip install hererocks
+  - hererocks lua_install -r^ --$LUA # install all stuff into ./lua_install
+  - export PATH=$PATH:$PWD/lua_install/bin
+
+install:
+  - luarocks install luacheck
+  - luarocks install busted
+  - luarocks install luacov
+
+script:
+  #- luarocks make --local
+  - luacheck --std max+busted *.lua
+  - busted --verbose .
