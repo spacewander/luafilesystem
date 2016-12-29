@@ -2,7 +2,7 @@ language: python
 sudo: false
 
 env:
-  - LUA="lua 5.1"
+  - LUA="luajit 2.0"
   - LUA="luajit 2.1"
 
 before_install:
@@ -13,9 +13,7 @@ before_install:
 install:
   - luarocks install luacheck
   - luarocks install busted
-  - luarocks install luacov
 
 script:
-  #- luarocks make --local
   - luacheck --std max+busted *.lua
   - busted --verbose .
