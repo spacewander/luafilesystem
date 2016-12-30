@@ -8,6 +8,23 @@ local is_not_nil = assert.is_not_nil
 local is_true = assert.is_true
 local has_error = assert.has_error
 
+local attr_names = {
+    'access',
+    'blksize',
+    'blocks',
+    'change',
+    'dev',
+    'gid',
+    'ino',
+    'mode',
+    'modification',
+    'nlink',
+    'permissions',
+    'rdev',
+    'size',
+    'uid'
+}
+
 describe('lfs', function()
     describe('attributes', function()
         it('without argument', function()
@@ -16,24 +33,8 @@ describe('lfs', function()
         end)
 
         it('with attribute name', function()
-            local names = {
-                'access',
-                'blksize',
-                'blocks',
-                'change',
-                'dev',
-                'gid',
-                'ino',
-                'mode',
-                'modification',
-                'nlink',
-                'permissions',
-                'rdev',
-                'size',
-                'uid'
-            }
-            for i = 1, #names do
-                local attr = names[i]
+            for i = 1, #attr_names do
+                local attr = attr_names[i]
                 local info = lfs.attributes('.', attr)
                 eq(vanilla_lfs.attributes('.', attr), info,
                    attr..' is not equal')
@@ -74,6 +75,22 @@ describe('lfs', function()
             is_nil(err)
             eq(vanilla_lfs.attributes(symlink, 'mode'), 'file')
             eq(vanilla_lfs.symlinkattributes(symlink, 'mode'), 'link')
+        end)
+
+        it('without argument', function()
+            lfs.link('lfs_ffi.lua', symlink, true)
+            local info = lfs.symlinkattributes(symlink)
+            eq(vanilla_lfs.symlinkattributes(symlink), info)
+        end)
+
+        it('with attribute name', function()
+            lfs.link('lfs_ffi.lua', symlink, true)
+            for i = 1, #attr_names do
+                local attr = attr_names[i]
+                local info = lfs.symlinkattributes(symlink, attr)
+                eq(vanilla_lfs.symlinkattributes(symlink, attr), info,
+                   attr..' is not equal')
+            end
         end)
 
         after_each(function()

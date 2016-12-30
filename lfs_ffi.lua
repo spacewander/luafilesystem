@@ -69,10 +69,12 @@ else
     ]])
 
     local stat_func
+    local lstat_func
     if OS == 'Linux' then
         local ARCH = ffi.arch
         -- Taken from justincormack/ljsyscall
         local stat_syscall_num
+        local lstat_syscall_num
         if ARCH == 'x64' then
             ffi.cdef([[
                 struct stat {
@@ -97,6 +99,7 @@ else
                 };
             ]])
             stat_syscall_num = 4
+            lstat_syscall_num = 6
         elseif ARCH == 'x86' then
             ffi.cdef([[
                 struct stat {
@@ -122,6 +125,7 @@ else
                 };
             ]])
             stat_syscall_num = IS_64_BIT and 106 or 195
+            lstat_syscall_num = IS_64_BIT and 107 or 196
         elseif ARCH == 'arm' then
             if IS_64_BIT then
                 ffi.cdef([[
@@ -149,6 +153,7 @@ else
                     };
                 ]])
                 stat_syscall_num = 106
+                lstat_syscall_num = 107
             else
                 ffi.cdef([[
                     struct stat {
@@ -174,6 +179,7 @@ else
                     };
                 ]])
                 stat_syscall_num = 195
+                lstat_syscall_num = 196
             end
         elseif ARCH == 'ppc' or ARCH == 'ppcspe' then
                 ffi.cdef([[
@@ -201,6 +207,7 @@ else
                     };
                 ]])
                 stat_syscall_num = IS_64_BIT and 106 or 195
+                lstat_syscall_num = IS_64_BIT and 107 or 196
         elseif ARCH == 'mips' or ARCH == 'mipsel' then
                 ffi.cdef([[
                     struct stat {
@@ -227,12 +234,16 @@ else
                     };
                 ]])
                 stat_syscall_num = IS_64_BIT and 4106 or 4213
+                lstat_syscall_num = IS_64_BIT and 4107 or 4214
         else
             error("TODO support other architectures")
         end
 
         stat_func = function(filepath, buf)
             return lib.syscall(stat_syscall_num, filepath, buf)
+        end
+        lstat_func = function(filepath, buf)
+            return lib.syscall(lstat_syscall_num, filepath, buf)
         end
     else
         error('TODO support other posix os')
@@ -304,9 +315,10 @@ else
     }
     local stat_type = ffi.metatype('struct stat', mt)
 
-    function _M.attributes(filepath, attr)
+    local function attributes(filepath, attr, follow_symlink)
         local buf = ffi.new(stat_type)
-        if stat_func(filepath, buf) == -1 then
+        local func = follow_symlink and stat_func or lstat_func
+        if func(filepath, buf) == -1 then
             return nil, errno()
         end
 
@@ -320,6 +332,14 @@ else
             end
             return tab
         end
+    end
+
+    function _M.attributes(filepath, attr)
+        return attributes(filepath, attr, true)
+    end
+
+    function _M.symlinkattributes(filepath, attr)
+        return attributes(filepath, attr, false)
     end
 
     function _M.chdir(path)
