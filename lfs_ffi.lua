@@ -7,8 +7,8 @@ local rshift = bit.rshift
 local lib = ffi.C
 local ffi_str = ffi.string
 local concat = table.concat
-local ok, new_tab = pcall(require, "table.new")
-if not ok or type(new_tab) ~= "function" then
+local has_table_new, new_tab = pcall(require, "table.new")
+if not has_table_new or type(new_tab) ~= "function" then
     new_tab = function () return {} end
 end
 
@@ -445,6 +445,81 @@ else
         return attributes(filepath, attr, false)
     end
 
+    ffi.cdef([[
+        typedef int pid_t;
+        struct flock {
+            short int l_type;
+            short int l_whence;
+            off_t l_start;
+            off_t l_len;
+            pid_t l_pid;
+        };
+        int open(const char *pathname, int flags);
+        int close(int fd);
+        int fcntl(int fd, int cmd, ... /* arg */ );
+    ]])
+
+    local SEEK_SET = 0
+    local F_SETLK = 6
+
+    local mode_ltype_map = {
+        r = 0, -- F_RDLCK
+        w = 1, -- F_WRLCK
+        u = 2 -- F_UNLCK
+    }
+
+    local function lock(fd, mode, start, len)
+        local flock = ffi.new('struct flock')
+        flock.l_type = mode_ltype_map[mode]
+        flock.l_whence = SEEK_SET
+        flock.l_start = start or 0
+        flock.l_len = len or 0
+        if lib.fcntl(fd, F_SETLK, flock) == -1 then
+            return nil, errno()
+        end
+        return true
+    end
+
+    local flock_type = ffi.metatype([[
+        struct {int fd;}
+    ]], {
+        __gc = function(self)
+            if self.fd > 0 then lib.close(self.fd) end
+        end
+    })
+
+    function _M.lock(filename, mode, start, length)
+        if mode ~= 'r' and mode ~= 'w' then
+            error("lock: invalid mode")
+        end
+        local flag
+        if mode == 'r' then
+            flag = 64 -- O_RDONLY | O_CREAT
+        else
+            flag = 1089 -- O_WRONLY | O_CREAT | O_APPEND
+        end
+        local fd = lib.open(filename, flag)
+        if fd == -1 then
+            return nil, errno()
+        end
+        local flock = ffi.new(flock_type)
+        flock.fd = fd
+        local ok, err = lock(flock.fd, mode, start, length)
+        if not ok then
+            return nil, err
+        end
+        return flock
+    end
+
+    function _M.unlock(flock, start, length)
+        if flock.fd ~= 0 then
+            local ok, err = lock(flock.fd, 'u', start, length)
+            if not ok then
+                return nil, err
+            end
+        end
+        return true
+    end
 end
 
 return _M

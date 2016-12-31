@@ -201,4 +201,35 @@ describe('lfs', function()
             eq(vanilla_lfs.attributes(touched, 'modification'), 2)
         end)
     end)
+
+    -- Just smoke testing
+    describe('lock/unlock', function()
+        local fn = 'temp.txt'
+
+        setup(function()
+            local fh = io.open(fn, 'w')
+            fh:write('1234567890')
+            fh:close()
+        end)
+
+        it('lock', function()
+            local _, err = lfs.lock(fn, 'r', 2, 8)
+            is_nil(err)
+        end)
+
+        it('lock exclusively', function()
+            local _, err = lfs.lock(fn, 'w')
+            is_nil(err)
+        end)
+
+        it('unlock', function()
+            local lock = lfs.lock(fn, 'w', 4, 9)
+            local _, err = lfs.unlock(lock, 3, 11)
+            is_nil(err)
+        end)
+
+        teardown(function()
+            os.remove('temp.txt')
+        end)
+    end)
 end)
