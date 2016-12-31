@@ -45,10 +45,71 @@ else
             time_t modtime;
         };
         int utime(const char *file, const struct utimebuf *times);
-
         int link(const char *oldpath, const char *newpath);
         int symlink(const char *oldpath, const char *newpath);
+    ]])
 
+    function _M.chdir(path)
+        if lib.chdir(path) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.currentdir()
+        local buf = ffi.new("char[?]", MAXPATH)
+        if lib.getcwd(buf, MAXPATH) ~= nil then
+            return ffi_str(buf)
+        end
+        return nil, errno()
+    end
+
+    function _M.mkdir(path, mode)
+        if lib.mkdir(path, mode or 509) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.rmdir(path)
+        if lib.rmdir(path) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.touch(path, actime, modtime)
+        local buf
+
+        if type(actime) == "number" then
+            modtime = modtime or actime
+            buf = ffi.new("struct utimebuf")
+            buf.actime  = actime
+            buf.modtime = modtime
+        end
+
+        local p = ffi.new("unsigned char[?]", #path + 1)
+        ffi.copy(p, path)
+
+        if lib.utime(p, buf) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.setmode()
+        return true, "binary"
+    end
+
+    function _M.link(old, new, symlink)
+        local f = symlink and lib.symlink or lib.link
+        if f(old, new) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    ffi.cdef([[
         typedef struct  __dirstream DIR;
 
         typedef size_t off_t;
@@ -65,12 +126,54 @@ else
         DIR *opendir(const char *name);
         struct dirent *readdir(DIR *dirp);
         int closedir(DIR *dirp);
-        long syscall(int number, ...);
     ]])
+
+    local function iterator(dir)
+        if dir.closed then error("closed directory") end
+
+        local entry = lib.readdir(dir.dir)
+
+        if entry ~= nil then
+            return ffi_str(entry.d_name)
+        else
+            dir.dir = nil
+            dir.closed = true
+            return nil
+        end
+    end
+
+    local function close(dir)
+        dir.dir = nil
+        dir.closed = true
+    end
+
+    local dirmeta = {__index = {
+        next = iterator,
+        close = close,
+    }}
+
+    function _M.dir(path)
+        local dir = lib.opendir(path)
+        if dir == nil then
+            error("cannot open "..path.." : "..errno())
+        end
+        ffi.gc(dir, lib.closedir)
+
+        local dir_obj = setmetatable ({
+            path    = path,
+            dir     = dir,
+            closed  = false,
+        }, dirmeta)
+
+        return iterator, dir_obj
+    end
 
     local stat_func
     local lstat_func
     if OS == 'Linux' then
+        ffi.cdef([[
+            long syscall(int number, ...);
+        ]])
         local ARCH = ffi.arch
         -- Taken from justincormack/ljsyscall
         local stat_syscall_num
@@ -342,105 +445,6 @@ else
         return attributes(filepath, attr, false)
     end
 
-    function _M.chdir(path)
-        if lib.chdir(path) == 0 then
-            return true
-        end
-        return nil, errno()
-    end
-
-    function _M.currentdir()
-        local buf = ffi.new("char[?]", MAXPATH)
-        if lib.getcwd(buf, MAXPATH) ~= nil then
-            return ffi_str(buf)
-        end
-        return nil, errno()
-    end
-
-    function _M.link(old, new, symlink)
-        local f = symlink and lib.symlink or lib.link
-        if f(old, new) == 0 then
-            return true
-        end
-        return nil, errno()
-    end
-
-    function _M.setmode()
-        return true, "binary"
-    end
-
-    local function iterator(dir)
-        if dir.closed then error("closed directory") end
-
-        local entry = lib.readdir(dir.dir)
-
-        if entry ~= nil then
-            return ffi_str(entry.d_name)
-        else
-            dir.dir = nil
-            dir.closed = true
-            return nil
-        end
-    end
-
-    local function close(dir)
-        dir.dir = nil
-        dir.closed = true
-    end
-
-    local dirmeta = {__index = {
-        next = iterator,
-        close = close,
-    }}
-
-    function _M.dir(path)
-        local dir = lib.opendir(path)
-        if dir == nil then
-            error("cannot open "..path.." : "..errno())
-        end
-        ffi.gc(dir, lib.closedir)
-
-        local dir_obj = setmetatable ({
-            path    = path,
-            dir     = dir,
-            closed  = false,
-        }, dirmeta)
-
-        return iterator, dir_obj
-    end
-
-    function _M.mkdir(path, mode)
-        if lib.mkdir(path, mode or 509) == 0 then
-            return true
-        end
-        return nil, errno()
-    end
-
-    function _M.rmdir(path)
-        if lib.rmdir(path) == 0 then
-            return true
-        end
-        return nil, errno()
-    end
-
-    function _M.touch(path, actime, modtime)
-        local buf
-
-        if type(actime) == "number" then
-            modtime = modtime or actime
-            buf = ffi.new("struct utimebuf")
-            buf.actime  = actime
-            buf.modtime = modtime
-        end
-
-        local p = ffi.new("unsigned char[?]", #path + 1)
-        ffi.copy(p, path)
-
-        if lib.utime(p, buf) == 0 then
-            return true
-        end
-        return nil, errno()
-    end
 end
 
 return _M
