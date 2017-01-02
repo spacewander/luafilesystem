@@ -179,6 +179,95 @@ if OS == "Windows" then
         return nil, errno()
         --return nil, 'function not implemented'
     end
+
+    local findfirst
+    local findnext
+    if IS_64_BIT then
+        ffi.cdef([[
+            typedef struct _finddata64_t {
+                uint64_t  attrib;
+                uint64_t  time_create;
+                uint64_t  time_access;
+                uint64_t  time_write;
+                uint64_t  size;
+                char      name[]] .. MAXPATH ..[[];
+            } _finddata_t;
+            int _findfirst64(const char *filespec, _finddata_t *fileinfo);
+            int _findnext64(int handle, _finddata_t *fileinfo);
+            int _findclose(int handle);
+        ]])
+        findfirst = lib._findfirst64
+        findnext = lib._findnext64
+    else
+        ffi.cdef([[
+            typedef struct _finddata32_t {
+                uint32_t  attrib;
+                uint32_t  time_create;
+                uint32_t  time_access;
+                uint32_t  time_write;
+                uint32_t  size;
+                char      name[]] .. MAXPATH ..[[];
+            } _finddata_t;
+            int _findfirst32(const char* filespec, _finddata_t* fileinfo);
+            int _findnext32(int handle, _finddata_t *fileinfo);
+            int _findclose(int handle);
+        ]])
+        findfirst = lib._findfirst32
+        findnext = lib._findnext32
+    end
+
+    local function findclose(dentry)
+        if dentry and dentry.handle ~= -1 then
+            lib._findclose(dentry.handle)
+            dentry.handle = -1
+        end
+    end
+
+    local dir_type = ffi.metatype("struct {int handle;}", {
+        __gc = findclose
+    })
+
+    local function close(dir)
+        findclose(dir._dentry)
+        dir.closed = true
+    end
+
+    local function iterator(dir)
+        if dir.closed then error("closed directory") end
+        local entry = ffi.new("_finddata_t")
+        if not dir._dentry then
+            dir._dentry = ffi.new(dir_type)
+            dir._dentry.handle = findfirst(dir._pattern, entry)
+            if dir._dentry.handle == -1 then
+                dir.closed = true
+                return nil, errno()
+            end
+            return ffi_str(entry.name)
+        end
+
+        local res = findnext(dir._dentry.handle, entry)
+		if res == 0 then
+            return ffi_str(entry.name)
+        end
+        close(dir)
+        return nil
+    end
+
+    local dirmeta = {__index = {
+        next = iterator,
+        close = close,
+    }}
+
+    function _M.dir(path)
+        if #path > MAXPATH - 2 then
+            error('path too long: ' .. path)
+        end
+        local dir_obj = setmetatable({
+            _pattern = path..'/*',
+            closed  = false,
+        }, dirmeta)
+        return iterator, dir_obj
+    end
 else
     local MAXPATH = 4096
     ffi.cdef([[
@@ -276,23 +365,28 @@ else
         int closedir(DIR *dirp);
     ]])
 
-    local function iterator(dir)
-        if dir.closed then error("closed directory") end
-
-        local entry = lib.readdir(dir.dir)
-
-        if entry ~= nil then
-            return ffi_str(entry.d_name)
-        else
-            dir.dir = nil
-            dir.closed = true
-            return nil
+    local function closedir(dentry)
+        if dentry ~= nil then
+            lib.closedir(dentry)
         end
     end
 
     local function close(dir)
-        dir.dir = nil
+        closedir(dir._dentry)
+        dir._dentry = nil
         dir.closed = true
+    end
+
+    local function iterator(dir)
+        if dir.closed then error("closed directory") end
+
+        local entry = lib.readdir(dir._dentry)
+        if entry ~= nil then
+            return ffi_str(entry.d_name)
+        else
+            close(dir)
+            return nil
+        end
     end
 
     local dirmeta = {__index = {
@@ -301,15 +395,14 @@ else
     }}
 
     function _M.dir(path)
-        local dir = lib.opendir(path)
-        if dir == nil then
+        local dentry = lib.opendir(path)
+        if dentry == nil then
             error("cannot open "..path.." : "..errno())
         end
-        ffi.gc(dir, lib.closedir)
+        ffi.gc(dentry, closedir)
 
         local dir_obj = setmetatable ({
-            path    = path,
-            dir     = dir,
+            _dentry  = dentry,
             closed  = false,
         }, dirmeta)
 

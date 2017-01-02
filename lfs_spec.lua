@@ -132,7 +132,7 @@ describe('lfs', function()
         end)
     end)
 
-    describe('dir', function()
+    describe('#dir', function()
         it('mkdir', function()
             lfs.mkdir('test')
         end)
@@ -144,8 +144,14 @@ describe('lfs', function()
         end)
 
         it('raise error if open dir failed', function()
-            has_error(function() lfs.dir('nonexisted') end,
-                "cannot open nonexisted : No such file or directory")
+            if posix then
+                has_error(function() lfs.dir('nonexisted') end,
+                    "cannot open nonexisted : No such file or directory")
+            else
+                -- Like vanilla lfs, we only check path's length in Windows
+                local ok, msg = pcall(function() lfs.dir(('12345'):rep(64)) end)
+                is_true(not ok)
+            end
         end)
 
         it('iterate dir', function()
