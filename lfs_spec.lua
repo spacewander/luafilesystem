@@ -12,8 +12,6 @@ local posix = ffi.os ~= 'Windows'
 
 local attr_names = {
     'access',
-    'blksize',
-    'blocks',
     'change',
     'dev',
     'gid',
@@ -26,9 +24,15 @@ local attr_names = {
     'size',
     'uid'
 }
+if posix then
+    local extra_attrs = {'blksize', 'blocks'}
+    for i = 1, #extra_attrs do
+        table.insert(attr_names, extra_attrs[i])
+    end
+end
 
 describe('lfs', function()
-    describe('attributes', function()
+    describe('#attributes', function()
         it('without argument', function()
             local info = lfs.attributes('.')
             eq(vanilla_lfs.attributes('.'), info)
@@ -54,9 +58,18 @@ describe('lfs', function()
             is_nil(info)
             eq('No such file or directory', err)
         end)
+        
+        it('with nonexisted attribute', function()
+            has_error(function() lfs.attributes('.', 'nonexisted') end,
+                'invalid attribute')
+            if not posix then
+                has_error(function() lfs.attributes('.', 'blocks') end,
+                    'invalid attribute')
+            end
+        end)
     end)
 
-    describe('symlinkattributes', function()
+    describe('#symlinkattributes', function()
         local symlink = 'lfs_ffi.lua.link'
 
         it('link failed', function()
