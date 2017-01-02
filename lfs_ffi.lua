@@ -83,6 +83,9 @@ if OS == "Windows" then
             const char* s,
             size_t n,
             mbstate_t* ps);
+
+        int _fileno(struct FILE *stream);
+        int _setmode(int fd, int mode); 
     ]])
 
     function _M.chdir(path)
@@ -133,8 +136,19 @@ if OS == "Windows" then
         return nil, errno()
     end
 
-    function _M.setmode()
-        return true, ""
+    function _M.setmode(file, mode)
+        if io.type(file) ~= 'file' then
+            error("setmode: invalid file")
+        end
+        if mode ~= nil and (mode ~= 'text' and mode ~= 'binary') then
+            error('setmode: invalid mode')
+        end
+        mode = (mode == 'text') and 0x4000 or 0x8000
+        local prev_mode = lib._setmode(lib._fileno(file), mode)
+        if prev_mode == -1 then
+            return nil, errno()
+        end
+        return true, (prev_mode == 0x4000) and 'text' or 'binary'
     end
     
     local function wchar_t(s)

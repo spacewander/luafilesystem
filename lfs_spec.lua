@@ -104,6 +104,34 @@ describe('lfs', function()
         end)
     end)
 
+    describe('#setmode', function()
+        local fh
+        before_each(function()
+            fh = io.open('lfs_ffi.lua')
+        end)
+
+        it('setmode', function()
+            local ok, mode = lfs.setmode(fh, 'binary')
+            is_true(ok)
+            if posix then
+                -- On posix platform, always return 'binary'
+                eq('binary', mode)
+            else
+                eq( 'text', mode)
+                _, mode = lfs.setmode(fh, 'text')
+                eq('binary', mode)
+            end
+        end)
+
+        it('setmode incorrect mode', function()
+            has_error(function() lfs.setmode(fh, 'bin') end, 'setmode: invalid mode')
+        end)
+
+        it('setmode incorrect file', function()
+            has_error(function() lfs.setmode('file', 'binary') end, 'setmode: invalid file')
+        end)
+    end)
+
     describe('dir', function()
         it('mkdir', function()
             lfs.mkdir('test')
