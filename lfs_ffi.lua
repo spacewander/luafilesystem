@@ -29,17 +29,151 @@ end
 
 local OS = ffi.os
 if OS == "Windows" then
-    error("TODO support Windows")
+    local MAXPATH = 260
+    local utime_def
+    if IS_64_BIT then
+        utime_def = [[
+            typedef __int64 time_t;
+            struct __utimebuf64 {
+                time_t actime;
+                time_t modtime;
+            };
+            typedef struct __utimebuf64 utimebuf;
+            int _utime64(unsigned char *file, utimebuf *times);
+        ]]
+    else
+        utime_def = [[
+            typedef __int32 time_t;
+            struct __utimebuf32 {
+                time_t actime;
+                time_t modtime;
+            };
+            typedef struct __utimebuf32 utimebuf;
+            int _utime632(unsigned char *file, utimebuf *times);
+        ]]
+    end
+
+    ffi.cdef([[
+        char *_getcwd(char *buf, size_t size);
+        int _chdir(const char *path);
+        int _rmdir(const char *pathname);
+        int _mkdir(const char *pathname);
+        ]] .. utime_def .. [[
+        typedef wchar_t* LPTSTR;
+        typedef unsigned char BOOLEAN;
+        typedef unsigned long DWORD;
+        BOOLEAN CreateSymbolicLinkW(
+            LPTSTR lpSymlinkFileName,
+            LPTSTR lpTargetFileName,
+            DWORD dwFlags
+        );
+        
+        typedef int mbstate_t;
+        /*
+        In VC2015, M$ change the definition of mbstate_t to this and breaks the ABI.
+        */
+        typedef struct _Mbstatet
+        { // state of a multibyte translation
+            unsigned long _Wchar;
+            unsigned short _Byte, _State;
+        } _Mbstatet;
+        typedef _Mbstatet mbstate_t;
+
+        size_t mbrtowc(wchar_t* pwc,
+            const char* s,
+            size_t n,
+            mbstate_t* ps);
+    ]])
+
+    function _M.chdir(path)
+        if lib._chdir(path) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.currentdir()
+        local buf = ffi.new("char[?]", MAXPATH)
+        if lib._getcwd(buf, MAXPATH) ~= nil then
+            return ffi_str(buf)
+        end
+        return nil, errno()
+    end
+
+    function _M.mkdir(path)
+        if lib._mkdir(path) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.rmdir(path)
+        if lib._rmdir(path) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.touch(path, actime, modtime)
+        local buf
+
+        if type(actime) == "number" then
+            modtime = modtime or actime
+            buf = ffi.new("utimebuf")
+            buf.actime  = actime
+            buf.modtime = modtime
+        end
+
+        local p = ffi.new("unsigned char[?]", #path + 1)
+        ffi.copy(p, path)
+        utime = IS_64_BIT and lib._utime64 or lib._utime32
+        if utime(p, buf) == 0 then
+            return true
+        end
+        return nil, errno()
+    end
+
+    function _M.setmode()
+        return true, ""
+    end
+    
+    local function wchar_t(s)
+        local mbstate = ffi.new('mbstate_t[1]')
+        local wcs = ffi.new('wchar_t[?]', #s + 1)
+        local i = 0
+        local offset = 0
+        local len = #s
+        while true do
+            local processed = lib.mbrtowc(
+                wcs + i, ffi.cast('const char *', s) + offset, len, mbstate)
+            if processed <= 0 then break end
+            i = i + 1
+            offset = offset + processed
+            len = len - processed
+        end
+        return wcs
+    end
+
+    function _M.link(old, new)
+        -- FIXME change is_dir to function
+        local is_dir = 0
+        if lib.CreateSymbolicLinkW(
+                wchar_t(new),
+                wchar_t(old), is_dir) ~= 0 then
+            return true
+        end
+        return nil, errno()
+        --return nil, 'function not implemented'
+    end
 else
     local MAXPATH = 4096
-
     ffi.cdef([[
         char *getcwd(char *buf, size_t size);
         int chdir(const char *path);
         int rmdir(const char *pathname);
         typedef unsigned int mode_t;
         int mkdir(const char *pathname, mode_t mode);
-        typedef uint64_t time_t;
+        typedef size_t time_t;
         struct utimebuf {
             time_t actime;
             time_t modtime;
@@ -399,7 +533,7 @@ else
         blocks = function(st) return tonumber(st.st_blocks) end,
         change = function(st) return tonumber(st.st_ctime) end,
         dev = function(st) return tonumber(st.st_dev) end,
-        gid = function(st) return st.st_gid end,
+        gid = function(st) return tonumber(st.st_gid) end,
         ino = function(st) return tonumber(st.st_ino) end,
         mode = function(st) return mode_to_ftype(st.st_mode) end,
         modification = function(st) return tonumber(st.st_mtime) end,
@@ -407,7 +541,7 @@ else
         permissions = function(st) return mode_to_perm(st.st_mode) end,
         rdev = function(st) return tonumber(st.st_rdev) end,
         size = function(st) return tonumber(st.st_size) end,
-        uid = function(st) return st.st_uid end,
+        uid = function(st) return tonumber(st.st_uid) end,
     }
 
     local mt = {

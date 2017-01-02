@@ -1,3 +1,4 @@
+local ffi = require('ffi')
 local vanilla_lfs = require('lfs')
 local lfs = require('./lfs_ffi')
 
@@ -7,6 +8,7 @@ local is_nil = assert.is_nil
 local is_not_nil = assert.is_not_nil
 local is_true = assert.is_true
 local has_error = assert.has_error
+local posix = ffi.os ~= 'Windows'
 
 local attr_names = {
     'access',
@@ -58,9 +60,11 @@ describe('lfs', function()
         local symlink = 'lfs_ffi.lua.link'
 
         it('link failed', function()
-            local res, err = lfs.link('xxx', symlink)
-            is_nil(res)
-            eq(err, 'No such file or directory')
+            if posix then
+                local res, err = lfs.link('xxx', symlink)
+                is_nil(res)
+                eq(err, 'No such file or directory')
+            end
         end)
 
         it('hard link', function()
@@ -71,10 +75,12 @@ describe('lfs', function()
         end)
 
         it('soft link', function()
-            local _, err = lfs.link('lfs_ffi.lua', symlink, true)
-            is_nil(err)
-            eq(vanilla_lfs.attributes(symlink, 'mode'), 'file')
-            eq(vanilla_lfs.symlinkattributes(symlink, 'mode'), 'link')
+            if posix then
+                local _, err = lfs.link('lfs_ffi.lua', symlink, true)
+                is_nil(err)
+                eq(vanilla_lfs.attributes(symlink, 'mode'), 'file')
+                eq(vanilla_lfs.symlinkattributes(symlink, 'mode'), 'link')
+            end
         end)
 
         it('without argument', function()
