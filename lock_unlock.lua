@@ -1,11 +1,12 @@
 #!/usr/bin/env luajit
 local lfs = require('./lfs_ffi')
 
+local fh = io.open('temp.txt', 'r+')
+
 local start = os.clock()
-local lock
 while true do
-    lock = lfs.lock('lfs_ffi.lua', 'w')
-    if lock then
+    local ok = lfs.lock(fh, 'w', 2, 7)
+    if ok then
         print('get lock')
         break
     end
@@ -20,5 +21,5 @@ while os.clock() - start < 3  do
 end
 
 print('unlock')
-local _, err = lfs.unlock(lock)
+local _, err = lfs.unlock(fh)
 print(err)

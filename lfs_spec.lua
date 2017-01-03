@@ -260,29 +260,45 @@ describe('lfs', function()
     end)
 
     -- Just smoke testing
-    describe('lock/unlock', function()
-        local fn = 'temp.txt'
-
+    describe('#lock', function()
+        local fh
         setup(function()
-            local fh = io.open(fn, 'w')
+            fh = io.open('temp.txt', 'w')
             fh:write('1234567890')
             fh:close()
         end)
 
+        before_each(function()
+            fh = io.open('temp.txt', 'r+')
+        end)
+
         it('lock', function()
-            local _, err = lfs.lock(fn, 'r', 2, 8)
+            local _, err = lfs.lock(fh, 'r', 2, 8)
             is_nil(err)
         end)
 
         it('lock exclusively', function()
-            local _, err = lfs.lock(fn, 'w')
+            local _, err = lfs.lock(fh, 'w')
             is_nil(err)
         end)
 
+        it('lock: invalid mode', function()
+            has_error(function() lfs.lock('temp.txt', 'u') end, 'lock: invalid mode')
+        end)
+
+        it('lock: invalid file', function()
+            has_error(function() lfs.lock('temp.txt', 'w') end, 'lock: invalid file')
+        end)
+
         it('unlock', function()
-            local lock = lfs.lock(fn, 'w', 4, 9)
-            local _, err = lfs.unlock(lock, 3, 11)
+            local _, err = lfs.lock(fh, 'w', 4, 9)
             is_nil(err)
+            _, err = lfs.unlock(fh, 3, 11)
+            is_nil(err)
+        end)
+
+        it('unlock: invalid file', function()
+            has_error(function() lfs.unlock('temp.txt') end, 'unlock: invalid file')
         end)
 
         teardown(function()

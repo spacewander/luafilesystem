@@ -418,27 +418,46 @@ else
         return iterator, dir_obj
     end
 
-    ffi.cdef([[
-        struct flock {
-            short int l_type;
-            short int l_whence;
-            int64_t l_start;
-            int64_t l_len;
-            int l_pid;
-        };
-        int open(const char *pathname, int flags);
-        int close(int fd);
+    local SEEK_SET = 0
+    local F_SETLK = (OS == 'Linux') and 6 or 8
+    local mode_ltype_map
+    local flock_def
+    if OS == 'Linux' then
+        flock_def = [[
+            struct flock {
+                short int l_type;
+                short int l_whence;
+                int64_t l_start;
+                int64_t l_len;
+                int l_pid;
+            };
+        ]]
+        mode_ltype_map = {
+            r = 0, -- F_RDLCK
+            w = 1, -- F_WRLCK
+            u = 2, -- F_UNLCK
+        }
+    else
+        flock_def = [[
+            struct flock {
+                int64_t	l_start;
+                int64_t	l_len;
+                int32_t	l_pid;
+                short	l_type;
+                short	l_whence;
+            };
+        ]]
+        mode_ltype_map = {
+            r = 1, -- F_RDLCK
+            u = 2, -- F_UNLCK
+            w = 3, -- F_WRLCK
+        }
+    end
+
+    ffi.cdef(flock_def..[[
+        int fileno(struct FILE *stream);
         int fcntl(int fd, int cmd, ... /* arg */ );
     ]])
-
-    local SEEK_SET = 0
-    local F_SETLK = 6
-
-    local mode_ltype_map = {
-        r = 0, -- F_RDLCK
-        w = 1, -- F_WRLCK
-        u = 2 -- F_UNLCK
-    }
 
     local function lock(fd, mode, start, len)
         local flock = ffi.new('struct flock')
@@ -452,43 +471,29 @@ else
         return true
     end
 
-    local flock_type = ffi.metatype([[
-        struct {int fd;}
-    ]], {
-        __gc = function(self)
-            if self.fd > 0 then lib.close(self.fd) end
-        end
-    })
-
-    function _M.lock(filename, mode, start, length)
+    function _M.lock(filehandle, mode, start, length)
         if mode ~= 'r' and mode ~= 'w' then
             error("lock: invalid mode")
         end
-        local flag
-        if mode == 'r' then
-            flag = 64 -- O_RDONLY | O_CREAT
-        else
-            flag = 1089 -- O_WRONLY | O_CREAT | O_APPEND
+        if io.type(filehandle) ~= 'file' then
+            error("lock: invalid file")
         end
-        local fd = lib.open(filename, flag)
-        if fd == -1 then
-            return nil, errno()
-        end
-        local flock = ffi.new(flock_type)
-        flock.fd = fd
-        local ok, err = lock(flock.fd, mode, start, length)
+        local fd = lib.fileno(filehandle)
+        local ok, err = lock(fd, mode, start, length)
         if not ok then
             return nil, err
         end
-        return flock
+        return true
     end
 
-    function _M.unlock(flock, start, length)
-        if flock.fd ~= 0 then
-            local ok, err = lock(flock.fd, 'u', start, length)
-            if not ok then
-                return nil, err
-            end
+    function _M.unlock(filehandle, start, length)
+        if io.type(filehandle) ~= 'file' then
+            error("unlock: invalid file")
+        end
+        local fd = lib.fileno(filehandle)
+        local ok, err = lock(fd, 'u', start, length)
+        if not ok then
+            return nil, err
         end
         return true
     end
