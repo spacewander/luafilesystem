@@ -58,7 +58,7 @@ describe('lfs', function()
             is_nil(info)
             eq('No such file or directory', err)
         end)
-        
+
         it('with nonexisted attribute', function()
             has_error(function() lfs.attributes('.', 'nonexisted') end,
                 'invalid attribute')
@@ -131,18 +131,21 @@ describe('lfs', function()
                 eq('binary', mode)
             else
                 eq( 'text', mode)
+                local _
                 _, mode = lfs.setmode(fh, 'text')
                 eq('binary', mode)
             end
         end)
 
-        it('setmode incorrect mode', function()
-            has_error(function() lfs.setmode(fh, 'bin') end, 'setmode: invalid mode')
-        end)
+        if not posix then
+            it('setmode incorrect mode', function()
+                has_error(function() lfs.setmode(fh, 'bin') end, 'setmode: invalid mode')
+            end)
 
-        it('setmode incorrect file', function()
-            has_error(function() lfs.setmode('file', 'binary') end, 'setmode: invalid file')
-        end)
+            it('setmode incorrect file', function()
+                has_error(function() lfs.setmode('file', 'binary') end, 'setmode: invalid file')
+            end)
+        end
     end)
 
     describe('#dir', function()
@@ -164,6 +167,7 @@ describe('lfs', function()
                 -- Like vanilla lfs, we only check path's length in Windows
                 local ok, msg = pcall(function() lfs.dir(('12345'):rep(64)) end)
                 is_true(not ok)
+                is_not_nil(msg:find('path too long'))
             end
         end)
 

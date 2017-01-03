@@ -16,6 +16,6 @@ install:
 
 script:
   - luacheck --std max+busted *.lua
-  - busted --verbose .
+  - busted --verbose . || exit 1
   - ./test_lock.lua > /tmp/lfs
   - grep 'ERROR' /tmp/lfs && exit 1 || exit 0

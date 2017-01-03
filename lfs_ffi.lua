@@ -67,7 +67,7 @@ if OS == "Windows" then
             LPTSTR lpTargetFileName,
             DWORD dwFlags
         );
-        
+
         typedef int mbstate_t;
         /*
         In VC2015, M$ change the definition of mbstate_t to this and breaks the ABI.
@@ -85,7 +85,7 @@ if OS == "Windows" then
             mbstate_t* ps);
 
         int _fileno(struct FILE *stream);
-        int _setmode(int fd, int mode); 
+        int _setmode(int fd, int mode);
     ]])
 
     function _M.chdir(path)
@@ -129,7 +129,7 @@ if OS == "Windows" then
 
         local p = ffi.new("unsigned char[?]", #path + 1)
         ffi.copy(p, path)
-        utime = IS_64_BIT and lib._utime64 or lib._utime32
+        local utime = IS_64_BIT and lib._utime64 or lib._utime32
         if utime(p, buf) == 0 then
             return true
         end
@@ -150,7 +150,7 @@ if OS == "Windows" then
         end
         return true, (prev_mode == 0x4000) and 'text' or 'binary'
     end
-    
+
     local function wchar_t(s)
         local mbstate = ffi.new('mbstate_t[1]')
         local wcs = ffi.new('wchar_t[?]', #s + 1)
@@ -245,8 +245,7 @@ if OS == "Windows" then
             return ffi_str(entry.name)
         end
 
-        local res = findnext(dir._dentry.handle, entry)
-		if res == 0 then
+        if findnext(dir._dentry.handle, entry) == 0 then
             return ffi_str(entry.name)
         end
         close(dir)
@@ -346,35 +345,42 @@ else
         return nil, errno()
     end
 
-    ffi.cdef([[
+    local dirent_def
+    if OS == 'OSX' or OS == 'BSD' then
+        dirent_def = [[
+            /* _DARWIN_FEATURE_64_BIT_INODE is NOT defined here? */
+            struct dirent {
+                uint32_t d_ino;
+                uint16_t d_reclen;
+                uint8_t  d_type;
+                uint8_t  d_namlen;
+                char d_name[256];
+            };
+        ]]
+    else
+        dirent_def = [[
+            struct dirent {
+                int64_t           d_ino;
+                size_t           d_off;
+                unsigned short  d_reclen;
+                unsigned char   d_type;
+                char            d_name[256];
+            };
+        ]]
+    end
+    ffi.cdef(dirent_def .. [[
         typedef struct  __dirstream DIR;
-
-        typedef size_t off_t;
-        typedef int64_t ino_t;
-
-        struct dirent {
-            ino_t           d_ino;
-            off_t           d_off;
-            unsigned short  d_reclen;
-            unsigned char   d_type;
-            char            d_name[256];
-        };
-
         DIR *opendir(const char *name);
         struct dirent *readdir(DIR *dirp);
         int closedir(DIR *dirp);
     ]])
 
-    local function closedir(dentry)
-        if dentry ~= nil then
-            lib.closedir(dentry)
-        end
-    end
-
     local function close(dir)
-        closedir(dir._dentry)
-        dir._dentry = nil
-        dir.closed = true
+        if dir._dentry ~= nil then
+            lib.closedir(dir._dentry)
+            dir._dentry = nil
+            dir.closed = 1
+        end
     end
 
     local function iterator(dir)
@@ -389,34 +395,36 @@ else
         end
     end
 
-    local dirmeta = {__index = {
+    local dir_obj_type = ffi.metatype([[
+        struct {
+            DIR *_dentry;
+            bool closed;
+        }
+    ]],
+    {__index = {
         next = iterator,
         close = close,
-    }}
+    }, __gc = close
+    })
 
     function _M.dir(path)
         local dentry = lib.opendir(path)
         if dentry == nil then
             error("cannot open "..path.." : "..errno())
         end
-        ffi.gc(dentry, closedir)
-
-        local dir_obj = setmetatable ({
-            _dentry  = dentry,
-            closed  = false,
-        }, dirmeta)
-
+        local dir_obj = ffi.new(dir_obj_type)
+        dir_obj._dentry = dentry
+        dir_obj.closed = false;
         return iterator, dir_obj
     end
 
     ffi.cdef([[
-        typedef int pid_t;
         struct flock {
             short int l_type;
             short int l_whence;
-            off_t l_start;
-            off_t l_len;
-            pid_t l_pid;
+            int64_t l_start;
+            int64_t l_len;
+            int l_pid;
         };
         int open(const char *pathname, int flags);
         int close(int fd);
@@ -686,8 +694,41 @@ elseif OS == 'Windows' then
 
     stat_func = lib._stat64i32
     lstat_func = stat_func
+elseif OS == 'OSX' then
+    ffi.cdef([[
+        struct timespec {
+            time_t tv_sec;
+            long tv_nsec;
+        };
+        typedef struct {
+            uint32_t           st_dev;
+            uint16_t          st_mode;
+            uint16_t         st_nlink;
+            uint64_t         st_ino;
+            uint32_t           st_uid;
+            uint32_t           st_gid;
+            uint32_t           st_rdev;
+            struct timespec st_atimespec;
+            struct timespec st_mtimespec;
+            struct timespec st_ctimespec;
+            struct timespec st_birthtimespec;
+            int64_t           st_size;
+            int64_t        st_blocks;
+            int32_t       st_blksize;
+            uint32_t        st_flags;
+            uint32_t        st_gen;
+            int32_t         st_lspare;
+            int64_t         st_qspare[2];
+        } stat;
+        int stat64(const char *path, stat *buf);
+        int lstat64(const char *path, stat *buf);
+    ]])
+    stat_func = lib.stat64
+    lstat_func = lib.lstat64
 else
-    error('TODO support other posix os')
+    ffi.cdef('typedef struct {} stat;')
+    stat_func = function() error('TODO: support other posix system') end
+    lstat_func = stat_func
 end
 
 local STAT = {
@@ -731,16 +772,24 @@ local function mode_to_perm(mode)
     return concat(perm)
 end
 
+local function time_or_timespec(time, timespec)
+    local t = tonumber(time)
+    if not t and timespec then
+        t = tonumber(timespec.tv_sec)
+    end
+    return t
+end
+
 local attr_handlers = {
-    access = function(st) return tonumber(st.st_atime) end,
+    access = function(st) return time_or_timespec(st.st_atime, st.st_atimespec) end,
     blksize = function(st) return tonumber(st.st_blksize) end,
     blocks = function(st) return tonumber(st.st_blocks) end,
-    change = function(st) return tonumber(st.st_ctime) end,
+    change = function(st) return time_or_timespec(st.st_ctime, st.st_ctimespec) end,
     dev = function(st) return tonumber(st.st_dev) end,
     gid = function(st) return tonumber(st.st_gid) end,
     ino = function(st) return tonumber(st.st_ino) end,
     mode = function(st) return mode_to_ftype(st.st_mode) end,
-    modification = function(st) return tonumber(st.st_mtime) end,
+    modification = function(st) return time_or_timespec(st.st_mtime, st.st_mtimespec) end,
     nlink = function(st) return tonumber(st.st_nlink) end,
     permissions = function(st) return mode_to_perm(st.st_mode) end,
     rdev = function(st) return tonumber(st.st_rdev) end,
@@ -786,5 +835,5 @@ end
 function _M.symlinkattributes(filepath, attr)
     return attributes(filepath, attr, false)
 end
-    
+
 return _M
