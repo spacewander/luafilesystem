@@ -1,9 +1,16 @@
 language: python
-sudo: false
 
-env:
-  - LUA="luajit 2.0"
-  - LUA="luajit 2.1"
+matrix:
+  include:
+    - os: linux
+      sudo: false
+      env: LUA="luajit 2.0"
+    - os: linux
+      sudo: false
+      env: LUA="luajit 2.1"
+    - os: osx
+      language: generic
+      env: LUA="luajit 2.1"
 
 before_install:
   - pip install hererocks
