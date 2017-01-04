@@ -61,10 +61,10 @@ describe('lfs', function()
 
         it('with nonexisted attribute', function()
             has_error(function() lfs.attributes('.', 'nonexisted') end,
-                'invalid attribute')
+                "invalid attribute name 'nonexisted'")
             if not posix then
                 has_error(function() lfs.attributes('.', 'blocks') end,
-                    'invalid attribute')
+                    "invalid attribute name 'blocks'")
             end
         end)
     end)
@@ -99,7 +99,10 @@ describe('lfs', function()
         it('without argument', function()
             lfs.link('lfs_ffi.lua', symlink, true)
             local info = lfs.symlinkattributes(symlink)
-            eq(vanilla_lfs.symlinkattributes(symlink), info)
+            local expected_info = vanilla_lfs.symlinkattributes(symlink)
+            for k, v in pairs(expected_info) do
+                eq(v, info[k], k..'is not equal')
+            end
         end)
 
         it('with attribute name', function()
@@ -109,6 +112,14 @@ describe('lfs', function()
                 local info = lfs.symlinkattributes(symlink, attr)
                 eq(vanilla_lfs.symlinkattributes(symlink, attr), info,
                    attr..' is not equal')
+            end
+        end)
+
+        it('add target field', function()
+            if posix then
+                lfs.link('lfs_ffi.lua', symlink, true)
+                eq('lfs_ffi.lua', lfs.symlinkattributes(symlink, 'target'))
+                eq('lfs_ffi.lua', lfs.symlinkattributes(symlink).target)
             end
         end)
 

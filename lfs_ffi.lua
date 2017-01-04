@@ -17,7 +17,9 @@ local _M = {
     _VERSION = "0.1",
 }
 
+-- common utils/constants
 local IS_64_BIT = ffi.abi('64bit')
+local ERANGE = 'Result too large'
 
 ffi.cdef([[
     char* strerror(int errnum);
@@ -28,8 +30,18 @@ local function errno()
 end
 
 local OS = ffi.os
+-- sys/syslimits.h
+local MAXPATH
+if OS == 'Windows' then
+    MAXPATH = 260
+elseif OS == 'Linux' then
+    MAXPATH = 4096
+else
+    MAXPATH = 1024
+end
+
+-- misc
 if OS == "Windows" then
-    local MAXPATH = 260
     local utime_def
     if IS_64_BIT then
         utime_def = [[
@@ -96,11 +108,18 @@ if OS == "Windows" then
     end
 
     function _M.currentdir()
-        local buf = ffi.new("char[?]", MAXPATH)
-        if lib._getcwd(buf, MAXPATH) ~= nil then
-            return ffi_str(buf)
+        local size = MAXPATH
+        while true do
+            local buf = ffi.new("char[?]", size)
+            if lib._getcwd(buf, size) ~= nil then
+                return ffi_str(buf)
+            end
+            local err = errno()
+            if err ~= ERANGE then
+                return nil, err
+            end
+            size = size * 2
         end
-        return nil, errno()
     end
 
     function _M.mkdir(path)
@@ -268,7 +287,6 @@ if OS == "Windows" then
         return iterator, dir_obj
     end
 else
-    local MAXPATH = 4096
     ffi.cdef([[
         char *getcwd(char *buf, size_t size);
         int chdir(const char *path);
@@ -293,11 +311,18 @@ else
     end
 
     function _M.currentdir()
-        local buf = ffi.new("char[?]", MAXPATH)
-        if lib.getcwd(buf, MAXPATH) ~= nil then
-            return ffi_str(buf)
+        local size = MAXPATH
+        while true do
+            local buf = ffi.new("char[?]", size)
+            if lib.getcwd(buf, size) ~= nil then
+                return ffi_str(buf)
+            end
+            local err = errno()
+            if err ~= ERANGE then
+                return nil, err
+            end
+            size = size * 2
         end
-        return nil, errno()
     end
 
     function _M.mkdir(path, mode)
@@ -500,6 +525,7 @@ else
     end
 end
 
+-- lock related
 local create_lockfile
 local delete_lockfile
 
@@ -540,6 +566,7 @@ function _M.lock_dir(path, _)
     return dir_lock
 end
 
+-- stat related
 local stat_func
 local lstat_func
 if OS == 'Linux' then
@@ -843,6 +870,30 @@ local attr_handlers = {
     uid = function(st) return tonumber(st.st_uid) end,
 }
 
+-- Add target field for symlinkattributes, which is the absolute path of linked target
+local get_link_target_path
+if OS == 'Windows' then
+    function get_link_target_path()
+        return nil
+    end
+else
+    ffi.cdef('unsigned long readlink(const char *path, char *buf, size_t bufsize);')
+    function get_link_target_path(link_path)
+        local size = MAXPATH
+        while true do
+            local buf = ffi.new('char[?]', size)
+            local read = lib.readlink(link_path, buf, size)
+            if read == -1 then
+                return nil, errno()
+            end
+            if read < size then
+                return ffi_str(buf)
+            end
+            size = size * 2
+        end
+    end
+end
+
 local mt = {
     __index = function(self, attr_name)
         local func = attr_handlers[attr_name]
@@ -860,15 +911,23 @@ local function attributes(filepath, attr, follow_symlink)
 
     local atype = type(attr)
     if atype == 'string' then
-        local value = buf[attr]
+        local value
+        if attr == 'target' and not follow_symlink then
+            value = get_link_target_path(filepath)
+        else
+            value = buf[attr]
+        end
         if value == nil then
-            error('invalid attribute')
+            error("invalid attribute name '" .. attr .. "'")
         end
         return value
     else
         local tab = (atype == 'table') and attr or {}
         for k, _ in pairs(attr_handlers) do
             tab[k] = buf[k]
+        end
+        if not follow_symlink then
+            tab.target = get_link_target_path(filepath)
         end
         return tab
     end
