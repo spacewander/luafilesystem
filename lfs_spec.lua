@@ -305,4 +305,22 @@ describe('lfs', function()
             os.remove('temp.txt')
         end)
     end)
+
+    describe('#lock_dir', function()
+        it('lock_dir', function()
+            if true then
+                local _, err = lfs.lock_dir('.')
+                is_nil(err)
+                _, err = lfs.lock_dir('.')
+                eq('File exists', err)
+            end
+            -- The old lock should be free during gc
+            collectgarbage()
+
+            local lock = lfs.lock_dir('.')
+            lock:free()
+            local _, err = lfs.lock_dir('.')
+            is_nil(err)
+        end)
+    end)
 end)

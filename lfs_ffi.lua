@@ -457,6 +457,7 @@ else
     ffi.cdef(flock_def..[[
         int fileno(struct FILE *stream);
         int fcntl(int fd, int cmd, ... /* arg */ );
+        int unlink(const char *path);
     ]])
 
     local function lock(fd, mode, start, len)
@@ -497,6 +498,46 @@ else
         end
         return true
     end
+end
+
+local create_lockfile
+local delete_lockfile
+
+if OS == 'Windows' then
+    error('TODO')
+else
+    function create_lockfile(path, lockname)
+        return lib.symlink(path, lockname) == 0
+    end
+
+    function delete_lockfile(path)
+        lib.unlink(path)
+    end
+end
+
+local function unlock_dir(dir_lock)
+    if dir_lock.lockname ~= nil then
+        delete_lockfile(dir_lock.lockname)
+        dir_lock.lockname = nil
+    end
+    return true
+end
+
+local dir_lock_type = ffi.metatype('struct {char *lockname;}',
+    {__gc = unlock_dir, __index = {free = unlock_dir}}
+)
+
+function _M.lock_dir(path, _)
+    -- It's interesting that the lock_dir from vanilla lfs just ignores second paramter.
+    -- So, I follow this behavior too :)
+    local dir_lock = ffi.new(dir_lock_type)
+    local lockname = path .. '/lockfile.lfs'
+    dir_lock.lockname = ffi.new('char[?]', #lockname + 1)
+    ffi.copy(dir_lock.lockname, lockname)
+    if not create_lockfile(path, lockname) then
+        return nil, errno()
+    end
+    return dir_lock
 end
 
 local stat_func
