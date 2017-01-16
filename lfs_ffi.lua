@@ -187,9 +187,12 @@ if OS == "Windows" then
         return wcs
     end
 
+    local function check_is_dir(path)
+        return _M.attributes(path, 'mode') == 'directory' and 1 or 0
+    end
+
     function _M.link(old, new)
-        -- FIXME change is_dir to function
-        local is_dir = 0
+        local is_dir = check_is_dir(old)
         if lib.CreateSymbolicLinkW(
                 wchar_t(new),
                 wchar_t(old), is_dir) ~= 0 then

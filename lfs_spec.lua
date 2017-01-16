@@ -218,7 +218,7 @@ describe('lfs', function()
             lfs.chdir('test')
             local cur_dir = lfs.currentdir()
             lfs.chdir('..')
-            is_not_nil(cur_dir:find('test$'))
+            assert.is_not_nil(cur_dir:find('test$'))
         end)
 
         it('return err if chdir failed', function()
