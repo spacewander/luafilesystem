@@ -289,8 +289,10 @@ describe('lfs', function()
         end)
 
         it('lock exclusively', function()
-            local _, err = lfs.lock(fh, 'w')
-            is_nil(err)
+            if posix then
+                local _, err = lfs.lock(fh, 'w')
+                is_nil(err)
+            end
         end)
 
         it('lock: invalid mode', function()
@@ -304,8 +306,15 @@ describe('lfs', function()
         it('unlock', function()
             local _, err = lfs.lock(fh, 'w', 4, 9)
             is_nil(err)
-            _, err = lfs.unlock(fh, 3, 11)
-            is_nil(err)
+            if posix then
+                _, err = lfs.unlock(fh, 3, 11)
+                is_nil(err)
+            else
+                _, err = lfs.unlock(fh, 3, 11)
+                eq('Permission denied', err)
+                _, err = lfs.unlock(fh, 4, 9)
+                is_nil(err)
+            end
         end)
 
         it('unlock: invalid file', function()

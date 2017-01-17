@@ -291,6 +291,67 @@ if OS == "Windows" then
         }, dirmeta)
         return iterator, dir_obj
     end
+
+    ffi.cdef([[
+        int _fileno(struct FILE *stream);
+        int fseek(struct FILE *stream, long offset, int origin);
+        long ftell(struct FILE *stream);
+        int _locking(int fd, int mode, long nbytes);
+    ]])
+
+    mode_ltype_map = {
+        r = 2, -- LK_NBLCK
+        w = 2, -- LK_NBLCK
+        u = 0, -- LK_UNLCK
+    }
+    SEEK_SET = 0
+    SEEK_END = 2
+
+    local function lock(fh, mode, start, len)
+        lkmode = mode_ltype_map[mode]
+        if not len or len <= 0 then
+            if lib.fseek(fh, 0, SEEK_END) ~= 0 then
+                return nil, errno()
+            end
+            len = lib.ftell(fh)
+        end
+        if not start or start <= 0 then
+            start = 0
+        end
+        if lib.fseek(fh, start, SEEK_SET) ~= 0 then
+            return nil, errno()
+        end
+        fd = lib._fileno(fh)
+        if lib._locking(fd, lkmode, len) == -1 then
+            return nil, errno()
+        end
+        return true
+    end
+
+    function _M.lock(filehandle, mode, start, length)
+        if mode ~= 'r' and mode ~= 'w' then
+            error("lock: invalid mode")
+        end
+        if io.type(filehandle) ~= 'file' then
+            error("lock: invalid file")
+        end
+        local ok, err = lock(filehandle, mode, start, length)
+        if not ok then
+            return nil, err
+        end
+        return true
+    end
+
+    function _M.unlock(filehandle, start, length)
+        if io.type(filehandle) ~= 'file' then
+            error("unlock: invalid file")
+        end
+        local ok, err = lock(filehandle, 'u', start, length)
+        if not ok then
+            return nil, err
+        end
+        return true
+    end
 else
     ffi.cdef([[
         char *getcwd(char *buf, size_t size);
