@@ -312,6 +312,10 @@ describe('lfs', function()
             has_error(function() lfs.unlock('temp.txt') end, 'unlock: invalid file')
         end)
 
+        after_each(function()
+            fh:close()
+        end)
+
         teardown(function()
             os.remove('temp.txt')
         end)
@@ -323,7 +327,7 @@ describe('lfs', function()
                 local _, err = lfs.lock_dir('.')
                 is_nil(err)
                 _, err = lfs.lock_dir('.')
-                eq('File exists', err)
+                assert.is_not_nil(err)
             end
             -- The old lock should be free during gc
             collectgarbage()

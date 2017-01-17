@@ -32,8 +32,44 @@ end
 local OS = ffi.os
 -- sys/syslimits.h
 local MAXPATH
+local wchar_t
 if OS == 'Windows' then
     MAXPATH = 260
+    ffi.cdef([[
+        typedef int mbstate_t;
+        /*
+        In VC2015, M$ change the definition of mbstate_t to this and breaks the ABI.
+        */
+        typedef struct _Mbstatet
+        { // state of a multibyte translation
+            unsigned long _Wchar;
+            unsigned short _Byte, _State;
+        } _Mbstatet;
+        typedef _Mbstatet mbstate_t;
+
+        size_t mbrtowc(wchar_t* pwc,
+            const char* s,
+            size_t n,
+            mbstate_t* ps);
+    ]])
+
+    function wchar_t(s)
+        local mbstate = ffi.new('mbstate_t[1]')
+        local wcs = ffi.new('wchar_t[?]', #s + 1)
+        local i = 0
+        local offset = 0
+        local len = #s
+        while true do
+            local processed = lib.mbrtowc(
+                wcs + i, ffi.cast('const char *', s) + offset, len, mbstate)
+            if processed <= 0 then break end
+            i = i + 1
+            offset = offset + processed
+            len = len - processed
+        end
+        return wcs
+    end
+
 elseif OS == 'Linux' then
     MAXPATH = 4096
 else
@@ -79,22 +115,6 @@ if OS == "Windows" then
             LPTSTR lpTargetFileName,
             DWORD dwFlags
         );
-
-        typedef int mbstate_t;
-        /*
-        In VC2015, M$ change the definition of mbstate_t to this and breaks the ABI.
-        */
-        typedef struct _Mbstatet
-        { // state of a multibyte translation
-            unsigned long _Wchar;
-            unsigned short _Byte, _State;
-        } _Mbstatet;
-        typedef _Mbstatet mbstate_t;
-
-        size_t mbrtowc(wchar_t* pwc,
-            const char* s,
-            size_t n,
-            mbstate_t* ps);
 
         int _fileno(struct FILE *stream);
         int _setmode(int fd, int mode);
@@ -170,23 +190,6 @@ if OS == "Windows" then
         return true, (prev_mode == 0x4000) and 'text' or 'binary'
     end
 
-    local function wchar_t(s)
-        local mbstate = ffi.new('mbstate_t[1]')
-        local wcs = ffi.new('wchar_t[?]', #s + 1)
-        local i = 0
-        local offset = 0
-        local len = #s
-        while true do
-            local processed = lib.mbrtowc(
-                wcs + i, ffi.cast('const char *', s) + offset, len, mbstate)
-            if processed <= 0 then break end
-            i = i + 1
-            offset = offset + processed
-            len = len - processed
-        end
-        return wcs
-    end
-
     local function check_is_dir(path)
         return _M.attributes(path, 'mode') == 'directory' and 1 or 0
     end
@@ -199,7 +202,6 @@ if OS == "Windows" then
             return true
         end
         return nil, errno()
-        --return nil, 'function not implemented'
     end
 
     local findfirst
@@ -529,31 +531,76 @@ else
 end
 
 -- lock related
+local dir_lock_struct
 local create_lockfile
 local delete_lockfile
 
 if OS == 'Windows' then
-    error('TODO')
+    ffi.cdef([[
+        typedef const wchar_t* LPCWSTR;
+        typedef struct _SECURITY_ATTRIBUTES {
+            DWORD nLength;
+            void *lpSecurityDescriptor;
+            int bInheritHandle;
+        } SECURITY_ATTRIBUTES;
+        typedef SECURITY_ATTRIBUTES *LPSECURITY_ATTRIBUTES;
+        void *CreateFileW(
+            LPCWSTR lpFileName,
+            DWORD dwDesiredAccess,
+            DWORD dwShareMode,
+            LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+            DWORD dwCreationDisposition,
+            DWORD dwFlagsAndAttributes,
+            void *hTemplateFile
+        );
+
+        int CloseHandle(void *hObject);
+    ]])
+
+    GENERIC_WRITE = 0x40000000
+    CREATE_NEW = 1
+    FILE_NORMAL_DELETE_ON_CLOSE = 0x04000080
+
+    dir_lock_struct = 'struct {void *lockname;}'
+
+    function create_lockfile(dir_lock, _, lockname)
+        lockname = wchar_t(lockname)
+        dir_lock.lockname = lib.CreateFileW(lockname, GENERIC_WRITE, 0, nil, CREATE_NEW,
+                FILE_NORMAL_DELETE_ON_CLOSE, nil)
+        return dir_lock.lockname ~= ffi.cast('void*', -1)
+    end
+
+    function delete_lockfile(dir_lock)
+        return lib.CloseHandle(dir_lock.lockname)
+    end
 else
-    function create_lockfile(path, lockname)
+    dir_lock_struct = 'struct {char *lockname;}'
+    function create_lockfile(dir_lock, path, lockname)
+        dir_lock.lockname = ffi.new('char[?]', #lockname + 1)
+        ffi.copy(dir_lock.lockname, lockname)
         return lib.symlink(path, lockname) == 0
     end
 
-    function delete_lockfile(path)
-        lib.unlink(path)
+    function delete_lockfile(dir_lock)
+        return lib.unlink(dir_lock.lockname)
     end
 end
 
 local function unlock_dir(dir_lock)
     if dir_lock.lockname ~= nil then
-        delete_lockfile(dir_lock.lockname)
+        dir_lock:delete_lockfile()
         dir_lock.lockname = nil
     end
     return true
 end
 
-local dir_lock_type = ffi.metatype('struct {char *lockname;}',
-    {__gc = unlock_dir, __index = {free = unlock_dir}}
+local dir_lock_type = ffi.metatype(dir_lock_struct,
+    {__gc = unlock_dir, 
+    __index = {
+        free = unlock_dir,
+        create_lockfile = create_lockfile,
+        delete_lockfile = delete_lockfile,
+    }}
 )
 
 function _M.lock_dir(path, _)
@@ -561,9 +608,7 @@ function _M.lock_dir(path, _)
     -- So, I follow this behavior too :)
     local dir_lock = ffi.new(dir_lock_type)
     local lockname = path .. '/lockfile.lfs'
-    dir_lock.lockname = ffi.new('char[?]', #lockname + 1)
-    ffi.copy(dir_lock.lockname, lockname)
-    if not create_lockfile(path, lockname) then
+    if not dir_lock:create_lockfile(path, lockname) then
         return nil, errno()
     end
     return dir_lock
