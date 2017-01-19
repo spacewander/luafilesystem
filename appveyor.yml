@@ -1,0 +1,27 @@
+version: 0.0.1.{build}-test
+shallow_clone: true
+matrix:
+  fast_finish: true
+
+environment:
+  matrix:
+  - LUA: "luajit 2.1"
+
+
+platform:
+  - x64
+  - x86
+
+install:
+  - set PATH=C:\Python35\scripts;%PATH%
+  - pip install hererocks
+  - hererocks env --%LUA% -rlatest
+  - call env\bin\activate
+  - luarocks install busted
+
+build_script:
+  - echo 'Start to test'
+
+test_script:
+  - busted --verbose .
+  - lua test_lock.lua

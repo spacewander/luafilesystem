@@ -182,31 +182,33 @@ describe('lfs', function()
             end
         end)
 
-        it('iterate dir', function()
-            local _, dir_obj = lfs.dir('test')
-            local names = {}
-            while true do
-                local name = dir_obj:next()
-                if not name then break end
-                names[#names + 1] = name
-            end
-            table.sort(names)
-            eq({'.', '..'}, names)
-            is_true(dir_obj.closed)
-        end)
+        if posix or os.getenv('CI') ~= 'True' then
+            it('iterate dir', function()
+                local _, dir_obj = lfs.dir('test')
+                local names = {}
+                while true do
+                    local name = dir_obj:next()
+                    if not name then break end
+                    names[#names + 1] = name
+                end
+                table.sort(names)
+                eq({'.', '..'}, names)
+                is_true(dir_obj.closed)
+            end)
 
-        it('iterate dir via iterator', function()
-            local iter, dir_obj = lfs.dir('test')
-            local names = {}
-            while true do
-                local name = iter(dir_obj)
-                if not name then break end
-                names[#names + 1] = name
-            end
-            table.sort(names)
-            eq({'.', '..'}, names)
-            is_true(dir_obj.closed)
-        end)
+            it('iterate dir via iterator', function()
+                local iter, dir_obj = lfs.dir('test')
+                local names = {}
+                while true do
+                    local name = iter(dir_obj)
+                    if not name then break end
+                    names[#names + 1] = name
+                end
+                table.sort(names)
+                eq({'.', '..'}, names)
+                is_true(dir_obj.closed)
+            end)
+        end
 
         it('close', function()
             local _, dir_obj = lfs.dir('.')
@@ -238,7 +240,7 @@ describe('lfs', function()
         end)
     end)
 
-    describe('touch', function()
+    describe('#touch', function()
         local touched = 'temp'
 
         before_each(function()
