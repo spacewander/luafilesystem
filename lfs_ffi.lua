@@ -121,6 +121,9 @@ if OS == "Windows" then
     ]])
 
     function _M.chdir(path)
+        if type(path) ~= 'string' then
+            error('path should be a string')
+        end
         if lib._chdir(path) == 0 then
             return true
         end
@@ -143,6 +146,9 @@ if OS == "Windows" then
     end
 
     function _M.mkdir(path)
+        if type(path) ~= 'string' then
+            error('path should be a string')
+        end
         if lib._mkdir(path) == 0 then
             return true
         end
@@ -150,6 +156,9 @@ if OS == "Windows" then
     end
 
     function _M.rmdir(path)
+        if type(path) ~= 'string' then
+            error('path should be a string')
+        end
         if lib._rmdir(path) == 0 then
             return true
         end
@@ -257,7 +266,7 @@ if OS == "Windows" then
     end
 
     local function iterator(dir)
-        if dir.closed then error("closed directory") end
+        if dir.closed ~= false then error("closed directory") end
         local entry = ffi.new("_finddata_t")
         if not dir._dentry then
             dir._dentry = ffi.new(dir_type)
@@ -299,16 +308,16 @@ if OS == "Windows" then
         int _locking(int fd, int mode, long nbytes);
     ]])
 
-    mode_ltype_map = {
+    local mode_ltype_map = {
         r = 2, -- LK_NBLCK
         w = 2, -- LK_NBLCK
         u = 0, -- LK_UNLCK
     }
-    SEEK_SET = 0
-    SEEK_END = 2
+    local SEEK_SET = 0
+    local SEEK_END = 2
 
     local function lock(fh, mode, start, len)
-        lkmode = mode_ltype_map[mode]
+        local lkmode = mode_ltype_map[mode]
         if not len or len <= 0 then
             if lib.fseek(fh, 0, SEEK_END) ~= 0 then
                 return nil, errno()
@@ -321,7 +330,7 @@ if OS == "Windows" then
         if lib.fseek(fh, start, SEEK_SET) ~= 0 then
             return nil, errno()
         end
-        fd = lib._fileno(fh)
+        local fd = lib._fileno(fh)
         if lib._locking(fd, lkmode, len) == -1 then
             return nil, errno()
         end
@@ -470,12 +479,12 @@ else
         if dir._dentry ~= nil then
             lib.closedir(dir._dentry)
             dir._dentry = nil
-            dir.closed = 1
+            dir.closed = true
         end
     end
 
     local function iterator(dir)
-        if dir.closed then error("closed directory") end
+        if dir.closed ~= false then error("closed directory") end
 
         local entry = lib.readdir(dir._dentry)
         if entry ~= nil then
@@ -618,9 +627,9 @@ if OS == 'Windows' then
         int CloseHandle(void *hObject);
     ]])
 
-    GENERIC_WRITE = 0x40000000
-    CREATE_NEW = 1
-    FILE_NORMAL_DELETE_ON_CLOSE = 0x04000080
+    local GENERIC_WRITE = 0x40000000
+    local CREATE_NEW = 1
+    local FILE_NORMAL_DELETE_ON_CLOSE = 0x04000080
 
     dir_lock_struct = 'struct {void *lockname;}'
 
@@ -656,7 +665,7 @@ local function unlock_dir(dir_lock)
 end
 
 local dir_lock_type = ffi.metatype(dir_lock_struct,
-    {__gc = unlock_dir, 
+    {__gc = unlock_dir,
     __index = {
         free = unlock_dir,
         create_lockfile = create_lockfile,
@@ -793,68 +802,72 @@ if OS == 'Linux' then
             lstat_syscall_num = 196
         end
     elseif ARCH == 'ppc' or ARCH == 'ppcspe' then
-            ffi.cdef([[
-                typedef struct {
-                    unsigned long long st_dev;
-                    unsigned long long st_ino;
-                    unsigned int    st_mode;
-                    unsigned int    st_nlink;
-                    unsigned int    st_uid;
-                    unsigned int    st_gid;
-                    unsigned long long st_rdev;
-                    unsigned long long __pad1;
-                    long long       st_size;
-                    int             st_blksize;
-                    int             __pad2;
-                    long long       st_blocks;
-                    int             st_atime;
-                    unsigned int    st_atime_nsec;
-                    int             st_mtime;
-                    unsigned int    st_mtime_nsec;
-                    int             st_ctime;
-                    unsigned int    st_ctime_nsec;
-                    unsigned int    __unused4;
-                    unsigned int    __unused5;
-                } stat;
-            ]])
-            stat_syscall_num = IS_64_BIT and 106 or 195
-            lstat_syscall_num = IS_64_BIT and 107 or 196
+        ffi.cdef([[
+            typedef struct {
+                unsigned long long st_dev;
+                unsigned long long st_ino;
+                unsigned int    st_mode;
+                unsigned int    st_nlink;
+                unsigned int    st_uid;
+                unsigned int    st_gid;
+                unsigned long long st_rdev;
+                unsigned long long __pad1;
+                long long       st_size;
+                int             st_blksize;
+                int             __pad2;
+                long long       st_blocks;
+                int             st_atime;
+                unsigned int    st_atime_nsec;
+                int             st_mtime;
+                unsigned int    st_mtime_nsec;
+                int             st_ctime;
+                unsigned int    st_ctime_nsec;
+                unsigned int    __unused4;
+                unsigned int    __unused5;
+            } stat;
+        ]])
+        stat_syscall_num = IS_64_BIT and 106 or 195
+        lstat_syscall_num = IS_64_BIT and 107 or 196
     elseif ARCH == 'mips' or ARCH == 'mipsel' then
-            ffi.cdef([[
-                typedef struct {
-                    unsigned long   st_dev;
-                    unsigned long   __st_pad0[3];
-                    unsigned long long      st_ino;
-                    mode_t          st_mode;
-                    nlink_t         st_nlink;
-                    uid_t           st_uid;
-                    gid_t           st_gid;
-                    unsigned long   st_rdev;
-                    unsigned long   __st_pad1[3];
-                    long long       st_size;
-                    time_t          st_atime;
-                    unsigned long   st_atime_nsec;
-                    time_t          st_mtime;
-                    unsigned long   st_mtime_nsec;
-                    time_t          st_ctime;
-                    unsigned long   st_ctime_nsec;
-                    unsigned long   st_blksize;
-                    unsigned long   __st_pad2;
-                    long long       st_blocks;
-                    long __st_padding4[14];
-                } stat;
-            ]])
-            stat_syscall_num = IS_64_BIT and 4106 or 4213
-            lstat_syscall_num = IS_64_BIT and 4107 or 4214
-    else
-        error("TODO support other architectures")
+        ffi.cdef([[
+            typedef struct {
+                unsigned long   st_dev;
+                unsigned long   __st_pad0[3];
+                unsigned long long      st_ino;
+                mode_t          st_mode;
+                nlink_t         st_nlink;
+                uid_t           st_uid;
+                gid_t           st_gid;
+                unsigned long   st_rdev;
+                unsigned long   __st_pad1[3];
+                long long       st_size;
+                time_t          st_atime;
+                unsigned long   st_atime_nsec;
+                time_t          st_mtime;
+                unsigned long   st_mtime_nsec;
+                time_t          st_ctime;
+                unsigned long   st_ctime_nsec;
+                unsigned long   st_blksize;
+                unsigned long   __st_pad2;
+                long long       st_blocks;
+                long __st_padding4[14];
+            } stat;
+        ]])
+        stat_syscall_num = IS_64_BIT and 4106 or 4213
+        lstat_syscall_num = IS_64_BIT and 4107 or 4214
     end
 
-    stat_func = function(filepath, buf)
-        return lib.syscall(stat_syscall_num, filepath, buf)
-    end
-    lstat_func = function(filepath, buf)
-        return lib.syscall(lstat_syscall_num, filepath, buf)
+    if stat_syscall_num then
+        stat_func = function(filepath, buf)
+            return lib.syscall(stat_syscall_num, filepath, buf)
+        end
+        lstat_func = function(filepath, buf)
+            return lib.syscall(lstat_syscall_num, filepath, buf)
+        end
+    else
+        ffi.cdef('typedef struct {} stat;')
+        stat_func = function() error("TODO support other Linux architectures") end
+        lstat_func = stat_func
     end
 elseif OS == 'Windows' then
     ffi.cdef([[
