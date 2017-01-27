@@ -1,12 +1,11 @@
+sudo: required
 language: python
 
 matrix:
   include:
     - os: linux
-      sudo: false
       env: LUA="luajit 2.0"
     - os: linux
-      sudo: false
       env: LUA="luajit 2.1"
     - os: osx
       language: generic
@@ -24,5 +23,4 @@ install:
 script:
   - luacheck --std max+busted *.lua
   - busted --verbose . || exit 1
-  - ./test_lock.lua > /tmp/lfs
-  - grep 'ERROR' /tmp/lfs && exit 1 || exit 0
+  - sudo bash travis.sh
