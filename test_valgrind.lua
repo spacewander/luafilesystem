@@ -1,4 +1,4 @@
-#!/usr/bin/env luajit
+#!/usr/bin/env lua
 
 -- This file drives valgrind test
 -- See .travis.yml for more detail.
