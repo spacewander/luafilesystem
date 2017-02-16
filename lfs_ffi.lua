@@ -33,6 +33,8 @@ local OS = ffi.os
 -- sys/syslimits.h
 local MAXPATH
 local wchar_t
+local win_utf8_to_unicode
+local win_unicode_to_utf8
 if OS == 'Windows' then
     MAXPATH = 260
     ffi.cdef([[
@@ -119,7 +121,41 @@ if OS == "Windows" then
         int _fileno(struct FILE *stream);
         int _setmode(int fd, int mode);
     ]])
+    
+    ffi.cdef([[
 
+    size_t wcslen(const wchar_t *str);
+    wchar_t *wcsncpy(wchar_t *strDest, const wchar_t *strSource, size_t count);
+    
+    int WideCharToMultiByte(
+        unsigned int     CodePage,
+        DWORD    dwFlags,
+        const wchar_t*  lpWideCharStr,
+        int      cchWideChar,
+        char*    lpMultiByteStr,
+        int      cbMultiByte,
+        const char*   lpDefaultChar,
+        int*   lpUsedDefaultChar);
+    
+    int MultiByteToWideChar(
+        unsigned int     CodePage,
+        DWORD    dwFlags,
+        const char*   lpMultiByteStr,
+        int      cbMultiByte,
+        wchar_t*   lpWideCharStr,
+        int      cchWideChar);
+    
+    ]])
+    
+    local CP_UTF8 = 65001
+    function win_utf8_to_unicode(szUtf8, szUnicode, nLenWchar)
+        return lib.MultiByteToWideChar(CP_UTF8, 0, szUtf8, -1, szUnicode, nLenWchar);
+    end
+    
+    function win_unicode_to_utf8( szUnicode,  nLenWchar, szUtf8,  nLen)
+        return lib.WideCharToMultiByte(CP_UTF8, 0, szUnicode, nLenWchar, szUtf8, nLen, nil, nil);
+    end
+    
     function _M.chdir(path)
         if type(path) ~= 'string' then
             error('path should be a string')
@@ -215,6 +251,8 @@ if OS == "Windows" then
 
     local findfirst
     local findnext
+    local wfindfirst
+    local wfindnext
     if IS_64_BIT then
         ffi.cdef([[
             typedef struct _finddata64_t {
@@ -243,10 +281,38 @@ if OS == "Windows" then
             } _finddata_t;
             int _findfirst32(const char* filespec, _finddata_t* fileinfo);
             int _findnext32(int handle, _finddata_t *fileinfo);
+            
+            int _findfirst(const char* filespec, _finddata_t* fileinfo);
+            int _findnext(int handle, _finddata_t *fileinfo);
+            
+            typedef struct _wfinddata_t {
+                uint32_t  attrib;
+                uint32_t  time_create;
+                uint32_t  time_access;
+                uint32_t  time_write;
+                uint32_t  size;
+                wchar_t      name[]] .. MAXPATH ..[[];
+            } _wfinddata_t;
+            intptr_t _wfindfirst(  
+            const wchar_t *filespec,  
+            struct _wfinddata_t *fileinfo   
+            );  
+            
+            int _wfindnext(  
+                intptr_t handle,  
+                struct _wfinddata_t *fileinfo   
+            );  
+            
             int _findclose(int handle);
         ]])
-        findfirst = lib._findfirst32
-        findnext = lib._findnext32
+        local ok
+        ok,findfirst = pcall(function() return lib._findfirst32 end)
+        if not ok then findfirst = lib._findfirst end
+        ok,findnext = pcall(function() return lib._findnext32 end)
+        if not ok then findnext = lib._findnext end
+
+        wfindfirst = lib._wfindfirst
+        wfindnext = lib._wfindnext
     end
 
     local function findclose(dentry)
@@ -284,13 +350,39 @@ if OS == "Windows" then
         close(dir)
         return nil
     end
+    
+    local function witerator(dir)
+        if dir.closed ~= false then error("closed directory") end
+        local entry = ffi.new("_wfinddata_t")
+        if not dir._dentry then
+            dir._dentry = ffi.new(dir_type)
+            local szPattern = ffi.new("wchar_t[?]",256)
+            win_utf8_to_unicode(dir._pattern, szPattern, 256);
+            dir._dentry.handle = wfindfirst(szPattern, entry)
+            if dir._dentry.handle == -1 then
+                dir.closed = true
+                return nil, errno()
+            end
+            local szName = ffi.new("char[?]",512)
+            win_unicode_to_utf8(entry.name, -1, szName, 512);
+            return ffi_str(szName)
+        end
+
+        if wfindnext(dir._dentry.handle, entry) == 0 then
+            local szName = ffi.new("char[?]",512)
+            win_unicode_to_utf8(entry.name, -1, szName, 512);
+            return ffi_str(szName)
+        end
+        close(dir)
+        return nil
+    end
 
     local dirmeta = {__index = {
         next = iterator,
         close = close,
     }}
 
-    function _M.dir(path)
+    function _M.sdir(path)
         if #path > MAXPATH - 2 then
             error('path too long: ' .. path)
         end
@@ -300,7 +392,31 @@ if OS == "Windows" then
         }, dirmeta)
         return iterator, dir_obj
     end
+    
+    local wdirmeta = {__index = {
+        next = witerator,
+        close = close,
+    }}
 
+    function _M.wdir(path)
+        if #path > MAXPATH - 2 then
+            error('path too long: ' .. path)
+        end
+        local dir_obj = setmetatable({
+            _pattern = path..'/*',
+            closed  = false,
+        }, wdirmeta)
+        return witerator, dir_obj
+    end
+    
+    function _M.dir(path)
+        if _M.unicode then
+            return _M.wdir(path)
+        else
+            return _M.sdir(path)
+        end
+    end
+    
     ffi.cdef([[
         int _fileno(struct FILE *stream);
         int fseek(struct FILE *stream, long offset, int origin);
@@ -540,11 +656,11 @@ else
     else
         flock_def = [[
             struct flock {
-                int64_t	l_start;
-                int64_t	l_len;
-                int32_t	l_pid;
-                short	l_type;
-                short	l_whence;
+                int64_t l_start;
+                int64_t l_len;
+                int32_t l_pid;
+                short   l_type;
+                short   l_whence;
             };
         ]]
         mode_ltype_map = {
@@ -885,9 +1001,19 @@ elseif OS == 'Windows' then
             long long           st_ctime;
         } stat;
         int _stat64i32(const char *path, stat *buffer);
+        int _stat(const char *path, stat *buffer);
+        int _wstat(const wchar_t *path, stat *buffer);  
     ]])
 
-    stat_func = lib._stat64i32
+    stat_func = function(filepath, buf)
+        if _M.unicode then
+            local szfp = ffi.new("wchar_t[?]",256)
+            win_utf8_to_unicode(filepath, szfp, 256);
+            return lib._wstat(szfp, buf)
+        else
+            return lib._stat(filepath, buf)
+        end
+    end
     lstat_func = stat_func
 elseif OS == 'OSX' then
     ffi.cdef([[
