@@ -879,15 +879,15 @@ elseif OS == 'Windows' then
             short               st_uid;
             short               st_gid;
             unsigned int        st_rdev;
-            long                st_size;
+            int64_t             st_size;
             long long           st_atime;
             long long           st_mtime;
             long long           st_ctime;
         } stat;
-        int _stat64i32(const char *path, stat *buffer);
+        int _stat64(const char *path, stat *buffer);
     ]])
 
-    stat_func = lib._stat64i32
+    stat_func = lib._stat64
     lstat_func = stat_func
 elseif OS == 'OSX' then
     ffi.cdef([[
