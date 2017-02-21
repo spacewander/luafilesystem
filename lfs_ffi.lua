@@ -32,6 +32,7 @@ end
 local OS = ffi.os
 -- sys/syslimits.h
 local MAXPATH
+local MAXPATH_UNC = 32760
 local wchar_t
 local win_utf8_to_unicode
 local win_unicode_to_utf8
@@ -105,9 +106,13 @@ if OS == "Windows" then
 
     ffi.cdef([[
         char *_getcwd(char *buf, size_t size);
+        wchar_t *_wgetcwd(wchar_t *buf, size_t size);
         int _chdir(const char *path);
+        int _wchdir(const wchar_t *path);
         int _rmdir(const char *pathname);
+        int _wrmdir(const wchar_t *pathname);
         int _mkdir(const char *pathname);
+        int _wmkdir(const wchar_t *pathname);
         ]] .. utime_def .. [[
         typedef wchar_t* LPTSTR;
         typedef unsigned char BOOLEAN;
@@ -148,25 +153,48 @@ if OS == "Windows" then
     ]])
     
     local CP_UTF8 = 65001
-    function win_utf8_to_unicode(szUtf8, szUnicode, nLenWchar)
-        return lib.MultiByteToWideChar(CP_UTF8, 0, szUtf8, -1, szUnicode, nLenWchar);
+    function win_utf8_to_unicode(szUtf8)
+        local nLenWchar = lib.MultiByteToWideChar(CP_UTF8, 0, szUtf8, -1, nil, 0 );
+        assert(nLenWchar ~=0 ,"error in win_unicode_to_utf8")
+        local szUnicode = ffi.new("wchar_t[?]",nLenWchar)
+        nLenWchar = lib.MultiByteToWideChar(CP_UTF8, 0, szUtf8, -1, szUnicode, nLenWchar);
+        assert(nLenWchar ~=0 ,"error in win_unicode_to_utf8")
+        return szUnicode
     end
     
-    function win_unicode_to_utf8( szUnicode,  nLenWchar, szUtf8,  nLen)
-        return lib.WideCharToMultiByte(CP_UTF8, 0, szUnicode, nLenWchar, szUtf8, nLen, nil, nil);
+    function win_unicode_to_utf8( szUnicode)
+        local nLen = lib.WideCharToMultiByte(CP_UTF8, 0, szUnicode, -1, nil, 0, nil, nil);
+        assert(nLen ~=0 ,"error in win_unicode_to_utf8")
+        local str = ffi.new("char[?]",nLen)
+        nLen = lib.WideCharToMultiByte(CP_UTF8, 0, szUnicode, -1, str, nLen, nil, nil);
+        assert(nLen ~=0 ,"error in win_unicode_to_utf8")
+        return str
     end
     
     function _M.chdir(path)
-        if type(path) ~= 'string' then
-            error('path should be a string')
-        end
-        if lib._chdir(path) == 0 then
-            return true
+        if _M.unicode then
+            local uncstr = win_utf8_to_unicode(path)
+            if lib._wchdir(uncstr) == 0 then return true end
+        else
+            if type(path) ~= 'string' then
+                error('path should be a string')
+            end
+            if lib._chdir(path) == 0 then
+                return true
+            end
         end
         return nil, errno()
     end
 
     function _M.currentdir()
+        if _M.unicode then
+            local buf = ffi.new("wchar_t[?]",MAXPATH_UNC)
+            if lib._wgetcwd(buf, MAXPATH_UNC) ~= nil then
+                local buf_utf = win_unicode_to_utf8(buf)
+                return ffi_str(buf_utf)
+            end
+            error("error in currentdir")
+        else
         local size = MAXPATH
         while true do
             local buf = ffi.new("char[?]", size)
@@ -179,24 +207,39 @@ if OS == "Windows" then
             end
             size = size * 2
         end
+        end
     end
 
     function _M.mkdir(path)
-        if type(path) ~= 'string' then
-            error('path should be a string')
-        end
-        if lib._mkdir(path) == 0 then
-            return true
+        if _M.unicode then
+            local unc_str = win_utf8_to_unicode(path)
+            if lib._wmkdir(unc_str) == 0 then
+                return true
+            end
+        else
+            if type(path) ~= 'string' then
+                error('path should be a string')
+            end
+            if lib._mkdir(path) == 0 then
+                return true
+            end
         end
         return nil, errno()
     end
 
     function _M.rmdir(path)
-        if type(path) ~= 'string' then
-            error('path should be a string')
-        end
-        if lib._rmdir(path) == 0 then
-            return true
+        if _M.unicode then
+            local unc_str = win_utf8_to_unicode(path)
+            if lib._wrmdir(unc_str) == 0 then
+                return true
+            end
+        else
+            if type(path) ~= 'string' then
+                error('path should be a string')
+            end
+            if lib._rmdir(path) == 0 then
+                return true
+            end
         end
         return nil, errno()
     end
@@ -356,21 +399,18 @@ if OS == "Windows" then
         local entry = ffi.new("_wfinddata_t")
         if not dir._dentry then
             dir._dentry = ffi.new(dir_type)
-            local szPattern = ffi.new("wchar_t[?]",256)
-            win_utf8_to_unicode(dir._pattern, szPattern, 256);
+            local szPattern = win_utf8_to_unicode(dir._pattern);
             dir._dentry.handle = wfindfirst(szPattern, entry)
             if dir._dentry.handle == -1 then
                 dir.closed = true
                 return nil, errno()
             end
-            local szName = ffi.new("char[?]",512)
-            win_unicode_to_utf8(entry.name, -1, szName, 512);
+            local szName = win_unicode_to_utf8(entry.name)--, -1, szName, 512);
             return ffi_str(szName)
         end
 
         if wfindnext(dir._dentry.handle, entry) == 0 then
-            local szName = ffi.new("char[?]",512)
-            win_unicode_to_utf8(entry.name, -1, szName, 512);
+            local szName = win_unicode_to_utf8(entry.name)--, -1, szName, 512);
             return ffi_str(szName)
         end
         close(dir)
@@ -987,6 +1027,7 @@ if OS == 'Linux' then
     end
 elseif OS == 'Windows' then
     ffi.cdef([[
+        typedef __int64 __time64_t;
         typedef struct {
             unsigned int        st_dev;
             unsigned short      st_ino;
@@ -995,23 +1036,22 @@ elseif OS == 'Windows' then
             short               st_uid;
             short               st_gid;
             unsigned int        st_rdev;
-            long                st_size;
-            long long           st_atime;
-            long long           st_mtime;
-            long long           st_ctime;
+            __int64             st_size;
+            __time64_t          st_atime;
+            __time64_t          st_mtime;
+            __time64_t          st_ctime;
         } stat;
-        int _stat64i32(const char *path, stat *buffer);
-        int _stat(const char *path, stat *buffer);
-        int _wstat(const wchar_t *path, stat *buffer);  
+
+        int _stat64(const char *path, stat *buffer);
+        int _wstat64(const wchar_t *path, stat *buffer);      
     ]])
 
     stat_func = function(filepath, buf)
         if _M.unicode then
-            local szfp = ffi.new("wchar_t[?]",256)
-            win_utf8_to_unicode(filepath, szfp, 256);
-            return lib._wstat(szfp, buf)
+            local szfp = win_utf8_to_unicode(filepath);
+            return lib._wstat64(szfp, buf)
         else
-            return lib._stat(filepath, buf)
+            return lib._stat64(filepath, buf)
         end
     end
     lstat_func = stat_func
@@ -1188,5 +1228,7 @@ end
 function _M.symlinkattributes(filepath, attr)
     return attributes(filepath, attr, false)
 end
+
+_M.unicode = true
 
 return _M
