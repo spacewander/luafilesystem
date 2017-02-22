@@ -151,23 +151,53 @@ if OS == "Windows" then
         int      cchWideChar);
     
     ]])
-    
+    ffi.cdef[[
+        static const int FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
+        static const int FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
+        
+        uint32_t GetLastError();
+        uint32_t FormatMessageA(
+            uint32_t dwFlags,
+            const void* lpSource,
+            uint32_t dwMessageId,
+            uint32_t dwLanguageId,
+            char* lpBuffer,
+            uint32_t nSize,
+            va_list *Arguments
+        );
+    ]]
+    -- Some helper functions
+    local function error_win(lvl)
+        local errcode = ffi.C.GetLastError()
+        local str = ffi.new("char[?]",1024)
+        local numout = ffi.C.FormatMessageA(bit.bor(ffi.C.FORMAT_MESSAGE_FROM_SYSTEM,
+            ffi.C.FORMAT_MESSAGE_IGNORE_INSERTS), nil, errcode, 0, str, 1023, nil)
+        if numout == 0 then
+            error("Windows Error: (Error calling FormatMessage)", lvl)
+        else
+            error("Windows Error: "..ffi.string(str, numout), lvl)
+        end
+    end
     local CP_UTF8 = 65001
+    local WC_ERR_INVALID_CHARS = 0x00000080
+    local MB_ERR_INVALID_CHARS  = 0x00000008
     function win_utf8_to_unicode(szUtf8)
-        local nLenWchar = lib.MultiByteToWideChar(CP_UTF8, 0, szUtf8, -1, nil, 0 );
-        assert(nLenWchar ~=0 ,"error in win_unicode_to_utf8")
+        local dwFlags = _M.unicode_errors and MB_ERR_INVALID_CHARS or 0
+        local nLenWchar = lib.MultiByteToWideChar(CP_UTF8, dwFlags, szUtf8, -1, nil, 0 );
+        if nLenWchar ==0 then error_win(2) end
         local szUnicode = ffi.new("wchar_t[?]",nLenWchar)
-        nLenWchar = lib.MultiByteToWideChar(CP_UTF8, 0, szUtf8, -1, szUnicode, nLenWchar);
-        assert(nLenWchar ~=0 ,"error in win_unicode_to_utf8")
+        nLenWchar = lib.MultiByteToWideChar(CP_UTF8, dwFlags, szUtf8, -1, szUnicode, nLenWchar);
+        if nLenWchar ==0 then error_win(2) end
         return szUnicode
     end
-    
+
     function win_unicode_to_utf8( szUnicode)
-        local nLen = lib.WideCharToMultiByte(CP_UTF8, 0, szUnicode, -1, nil, 0, nil, nil);
-        assert(nLen ~=0 ,"error in win_unicode_to_utf8")
+        local dwFlags = _M.unicode_errors and WC_ERR_INVALID_CHARS or 0
+        local nLen = lib.WideCharToMultiByte(CP_UTF8, dwFlags, szUnicode, -1, nil, 0, nil, nil);
+        if nLen ==0 then error_win(2) end
         local str = ffi.new("char[?]",nLen)
-        nLen = lib.WideCharToMultiByte(CP_UTF8, 0, szUnicode, -1, str, nLen, nil, nil);
-        assert(nLen ~=0 ,"error in win_unicode_to_utf8")
+        nLen = lib.WideCharToMultiByte(CP_UTF8, dwFlags, szUnicode, -1, str, nLen, nil, nil);
+        if nLen ==0 then error_win(2) end
         return str
     end
     
