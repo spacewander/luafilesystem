@@ -78,6 +78,17 @@ end
 
 -- misc
 if OS == "Windows" then
+    -- try to adapt for the WINE
+    ffi.cdef([[
+        void *GetModuleHandleA(const char *module);
+        void *GetProcAddress(void *hModule, const char *lpProcName);
+    ]])
+    local hntdll = lib.GetModuleHandleA("ntdll.dll")
+    local wine_get_version = lib.GetProcAddress(hntdll, "wine_get_version")
+    if wine_get_version ~= nil then
+        lib = ffi.load("msvcrt")
+    end
+
     local utime_def
     if IS_64_BIT then
         utime_def = [[
