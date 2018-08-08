@@ -7,6 +7,10 @@ matrix:
       env: LUA="luajit 2.0"
     - os: linux
       env: LUA="luajit 2.1"
+      addons:
+        apt:
+          packages:
+            - valgrind
     - os: osx
       language: generic
       env: LUA="luajit 2.1"
