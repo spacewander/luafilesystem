@@ -27,4 +27,4 @@ install:
 script:
   - luacheck --std max+busted *.lua
   - busted --verbose . || exit 1
-  - if [ "$LUA" = "luajit 2.1" ]; then sudo bash travis.sh; fi
+  - if [ "$LUA" = "luajit 2.1" ]; then bash travis.sh; fi
