@@ -2,9 +2,17 @@ local bit = require "bit"
 local ffi = require "ffi"
 
 
+local pairs = pairs
+local setmetatable = setmetatable
+local tonumber = tonumber
+local type = type
 local band = bit.band
 local rshift = bit.rshift
+local io_type = io.type
 local lib = ffi.C
+local ffi_cast = ffi.cast
+local ffi_errno = ffi.errno
+local ffi_new = ffi.new
 local ffi_str = ffi.string
 local concat = table.concat
 local has_table_new, new_tab = pcall(require, "table.new")
@@ -26,7 +34,7 @@ ffi.cdef([[
 ]])
 
 local function errno()
-    return ffi_str(lib.strerror(ffi.errno()))
+    return ffi_str(lib.strerror(ffi_errno()))
 end
 
 local OS = ffi.os
@@ -54,14 +62,14 @@ if OS == 'Windows' then
     ]])
 
     function wchar_t(s)
-        local mbstate = ffi.new('mbstate_t[1]')
-        local wcs = ffi.new('wchar_t[?]', #s + 1)
+        local mbstate = ffi_new('mbstate_t[1]')
+        local wcs = ffi_new('wchar_t[?]', #s + 1)
         local i = 0
         local offset = 0
         local len = #s
         while true do
             local processed = lib.mbrtowc(
-                wcs + i, ffi.cast('const char *', s) + offset, len, mbstate)
+                wcs + i, ffi_cast('const char *', s) + offset, len, mbstate)
             if processed <= 0 then break end
             i = i + 1
             offset = offset + processed
@@ -133,7 +141,7 @@ if OS == "Windows" then
     function _M.currentdir()
         local size = MAXPATH
         while true do
-            local buf = ffi.new("char[?]", size)
+            local buf = ffi_new("char[?]", size)
             if lib._getcwd(buf, size) ~= nil then
                 return ffi_str(buf)
             end
@@ -170,13 +178,12 @@ if OS == "Windows" then
 
         if type(actime) == "number" then
             modtime = modtime or actime
-            buf = ffi.new("utimebuf")
+            buf = ffi_new("utimebuf")
             buf.actime  = actime
             buf.modtime = modtime
         end
 
-        local p = ffi.new("unsigned char[?]", #path + 1)
-        ffi.copy(p, path)
+        local p = ffi_new("unsigned char[?]", #path + 1, path)
         local utime = IS_64_BIT and lib._utime64 or lib._utime32
         if utime(p, buf) == 0 then
             return true
@@ -185,7 +192,7 @@ if OS == "Windows" then
     end
 
     function _M.setmode(file, mode)
-        if io.type(file) ~= 'file' then
+        if io_type(file) ~= 'file' then
             error("setmode: invalid file")
         end
         if mode ~= nil and (mode ~= 'text' and mode ~= 'binary') then
@@ -267,9 +274,9 @@ if OS == "Windows" then
 
     local function iterator(dir)
         if dir.closed ~= false then error("closed directory") end
-        local entry = ffi.new("_finddata_t")
+        local entry = ffi_new("_finddata_t")
         if not dir._dentry then
-            dir._dentry = ffi.new(dir_type)
+            dir._dentry = ffi_new(dir_type)
             dir._dentry.handle = findfirst(dir._pattern, entry)
             if dir._dentry.handle == -1 then
                 dir.closed = true
@@ -341,7 +348,7 @@ if OS == "Windows" then
         if mode ~= 'r' and mode ~= 'w' then
             error("lock: invalid mode")
         end
-        if io.type(filehandle) ~= 'file' then
+        if io_type(filehandle) ~= 'file' then
             error("lock: invalid file")
         end
         local ok, err = lock(filehandle, mode, start, length)
@@ -352,7 +359,7 @@ if OS == "Windows" then
     end
 
     function _M.unlock(filehandle, start, length)
-        if io.type(filehandle) ~= 'file' then
+        if io_type(filehandle) ~= 'file' then
             error("unlock: invalid file")
         end
         local ok, err = lock(filehandle, 'u', start, length)
@@ -388,7 +395,7 @@ else
     function _M.currentdir()
         local size = MAXPATH
         while true do
-            local buf = ffi.new("char[?]", size)
+            local buf = ffi_new("char[?]", size)
             if lib.getcwd(buf, size) ~= nil then
                 return ffi_str(buf)
             end
@@ -419,14 +426,12 @@ else
 
         if type(actime) == "number" then
             modtime = modtime or actime
-            buf = ffi.new("struct utimebuf")
+            buf = ffi_new("struct utimebuf")
             buf.actime  = actime
             buf.modtime = modtime
         end
 
-        local p = ffi.new("unsigned char[?]", #path + 1)
-        ffi.copy(p, path)
-
+        local p = ffi_new("unsigned char[?]", #path + 1, path)
         if lib.utime(p, buf) == 0 then
             return true
         end
@@ -512,7 +517,7 @@ else
         if dentry == nil then
             error("cannot open "..path.." : "..errno())
         end
-        local dir_obj = ffi.new(dir_obj_type)
+        local dir_obj = ffi_new(dir_obj_type)
         dir_obj._dentry = dentry
         dir_obj.closed = false;
         return iterator, dir_obj
@@ -561,7 +566,7 @@ else
     ]])
 
     local function lock(fd, mode, start, len)
-        local flock = ffi.new('struct flock')
+        local flock = ffi_new('struct flock')
         flock.l_type = mode_ltype_map[mode]
         flock.l_whence = SEEK_SET
         flock.l_start = start or 0
@@ -576,7 +581,7 @@ else
         if mode ~= 'r' and mode ~= 'w' then
             error("lock: invalid mode")
         end
-        if io.type(filehandle) ~= 'file' then
+        if io_type(filehandle) ~= 'file' then
             error("lock: invalid file")
         end
         local fd = lib.fileno(filehandle)
@@ -588,7 +593,7 @@ else
     end
 
     function _M.unlock(filehandle, start, length)
-        if io.type(filehandle) ~= 'file' then
+        if io_type(filehandle) ~= 'file' then
             error("unlock: invalid file")
         end
         local fd = lib.fileno(filehandle)
@@ -637,7 +642,7 @@ if OS == 'Windows' then
         lockname = wchar_t(lockname)
         dir_lock.lockname = lib.CreateFileW(lockname, GENERIC_WRITE, 0, nil, CREATE_NEW,
                 FILE_NORMAL_DELETE_ON_CLOSE, nil)
-        return dir_lock.lockname ~= ffi.cast('void*', -1)
+        return dir_lock.lockname ~= ffi_cast('void*', -1)
     end
 
     function delete_lockfile(dir_lock)
@@ -646,8 +651,7 @@ if OS == 'Windows' then
 else
     dir_lock_struct = 'struct {char *lockname;}'
     function create_lockfile(dir_lock, path, lockname)
-        dir_lock.lockname = ffi.new('char[?]', #lockname + 1)
-        ffi.copy(dir_lock.lockname, lockname)
+        dir_lock.lockname = ffi_new('char[?]', #lockname + 1, lockname)
         return lib.symlink(path, lockname) == 0
     end
 
@@ -676,7 +680,7 @@ local dir_lock_type = ffi.metatype(dir_lock_struct,
 function _M.lock_dir(path, _)
     -- It's interesting that the lock_dir from vanilla lfs just ignores second paramter.
     -- So, I follow this behavior too :)
-    local dir_lock = ffi.new(dir_lock_type)
+    local dir_lock = ffi_new(dir_lock_type)
     local lockname = path .. '/lockfile.lfs'
     if not dir_lock:create_lockfile(path, lockname) then
         return nil, errno()
@@ -1003,7 +1007,7 @@ else
     function get_link_target_path(link_path)
         local size = MAXPATH
         while true do
-            local buf = ffi.new('char[?]', size)
+            local buf = ffi_new('char[?]', size)
             local read = lib.readlink(link_path, buf, size)
             if read == -1 then
                 return nil, errno()
@@ -1025,7 +1029,7 @@ local mt = {
 local stat_type = ffi.metatype('stat', mt)
 
 local function attributes(filepath, attr, follow_symlink)
-    local buf = ffi.new(stat_type)
+    local buf = ffi_new(stat_type)
     local func = follow_symlink and stat_func or lstat_func
     if func(filepath, buf) == -1 then
         return nil, errno()
