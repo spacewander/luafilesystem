@@ -1,4 +1,4 @@
-#!/usr/bin/env luajit
+#!/usr/bin/env lua
 local lfs = require('./lfs_ffi')
 
 local fh = io.open('temp.txt', 'r+')

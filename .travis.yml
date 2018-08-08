@@ -7,6 +7,10 @@ matrix:
       env: LUA="luajit 2.0"
     - os: linux
       env: LUA="luajit 2.1"
+      addons:
+        apt:
+          packages:
+            - valgrind
     - os: osx
       language: generic
       env: LUA="luajit 2.1"
@@ -23,4 +27,4 @@ install:
 script:
   - luacheck --std max+busted *.lua
   - busted --verbose . || exit 1
-  - if [ "$LUA" = "luajit 2.1" ]; then sudo bash travis.sh; fi
+  - if [ "$LUA" = "luajit 2.1" ]; then bash travis.sh; fi
