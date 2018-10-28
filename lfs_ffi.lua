@@ -188,7 +188,7 @@ if OS == "Windows" then
         local szUnicode = ffi.new("wchar_t[?]",nLenWchar)
         nLenWchar = lib.MultiByteToWideChar(CP_UTF8, dwFlags, szUtf8, -1, szUnicode, nLenWchar);
         if nLenWchar ==0 then error_win(2) end
-        return szUnicode
+        return szUnicode, nLenWchar
     end
 
     function win_unicode_to_utf8( szUnicode)
@@ -200,7 +200,17 @@ if OS == "Windows" then
         if nLen ==0 then error_win(2) end
         return str
     end
-    
+    local CP_ACP = 0
+    function _M.win_utf8_to_acp(utf)
+        local szUnicode = win_utf8_to_unicode(utf)
+        local dwFlags = _M.unicode_errors and WC_ERR_INVALID_CHARS or 0
+        local nLen = lib.WideCharToMultiByte(CP_ACP, dwFlags, szUnicode, -1, nil, 0, nil, nil);
+        if nLen ==0 then error_win(2) end
+        local str = ffi.new("char[?]",nLen)
+        nLen = lib.WideCharToMultiByte(CP_ACP, dwFlags, szUnicode, -1, str, nLen, nil, nil);
+        if nLen ==0 then error_win(2) end
+        return ffi_str(str)
+    end
     function _M.chdir(path)
         if _M.unicode then
             local uncstr = win_utf8_to_unicode(path)
@@ -339,9 +349,22 @@ if OS == "Windows" then
             int _findfirst64(const char *filespec, _finddata_t *fileinfo);
             int _findnext64(int handle, _finddata_t *fileinfo);
             int _findclose(int handle);
+            typedef struct _wfinddata_t { //is _wfinddata64_t
+                uint64_t  attrib;
+                uint64_t  time_create;
+                uint64_t  time_access;
+                uint64_t  time_write;
+                uint64_t  size;
+                wchar_t      name[]] .. MAXPATH ..[[];
+            } _wfinddata_t;
+            intptr_t _wfindfirst64(const wchar_t *filespec, struct _wfinddata_t *fileinfo);  
+            int _wfindnext64(intptr_t handle,struct _wfinddata_t *fileinfo);  
+                                                              
         ]])
         findfirst = lib._findfirst64
         findnext = lib._findnext64
+        wfindfirst = lib._wfindfirst64
+        wfindnext = lib._wfindnext64
     else
         ffi.cdef([[
             typedef struct _finddata32_t {
