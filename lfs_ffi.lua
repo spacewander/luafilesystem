@@ -152,8 +152,6 @@ if OS == "Windows" then
     
     ]])
     ffi.cdef[[
-        static const int FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
-        static const int FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
         
         uint32_t GetLastError();
         uint32_t FormatMessageA(
@@ -170,8 +168,10 @@ if OS == "Windows" then
     local function error_win(lvl)
         local errcode = ffi.C.GetLastError()
         local str = ffi.new("char[?]",1024)
-        local numout = ffi.C.FormatMessageA(bit.bor(ffi.C.FORMAT_MESSAGE_FROM_SYSTEM,
-            ffi.C.FORMAT_MESSAGE_IGNORE_INSERTS), nil, errcode, 0, str, 1023, nil)
+        local FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
+        local FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
+        local numout = ffi.C.FormatMessageA(bit.bor(FORMAT_MESSAGE_FROM_SYSTEM,
+            FORMAT_MESSAGE_IGNORE_INSERTS), nil, errcode, 0, str, 1023, nil)
         if numout == 0 then
             error("Windows Error: (Error calling FormatMessage)", lvl)
         else
@@ -1283,5 +1283,8 @@ function _M.symlinkattributes(filepath, attr)
 end
 
 _M.unicode = true
+_M.unicode_errors = false
+--this would error with _M.unicode_errors = true
+--local cad = string.char(0xE0,0x80,0x80)--,0xFD,0xFF)
 
 return _M
