@@ -190,7 +190,7 @@ if OS == "Windows" then
         if nLenWchar ==0 then error_win(2) end
         return szUnicode, nLenWchar
     end
-
+    _M.win_utf8_to_unicode = win_utf8_to_unicode
     function win_unicode_to_utf8( szUnicode)
         local dwFlags = _M.unicode_errors and WC_ERR_INVALID_CHARS or 0
         local nLen = lib.WideCharToMultiByte(CP_UTF8, dwFlags, szUnicode, -1, nil, 0, nil, nil);
@@ -200,6 +200,7 @@ if OS == "Windows" then
         if nLen ==0 then error_win(2) end
         return str
     end
+    _M.win_unicode_to_utf8 = win_unicode_to_utf8
     local CP_ACP = 0
     function _M.win_utf8_to_acp(utf)
         local szUnicode = win_utf8_to_unicode(utf)
@@ -925,7 +926,7 @@ if OS == 'Linux' then
                 unsigned long   st_ctime;
                 unsigned long   st_ctime_nsec;
                 long            __unused[3];
-            } stat;
+            } lfs_stat;
         ]])
         stat_syscall_num = 4
         lstat_syscall_num = 6
@@ -951,7 +952,7 @@ if OS == 'Linux' then
                 unsigned long   st_ctime;
                 unsigned long   st_ctime_nsec;
                 unsigned long long      st_ino;
-            } stat;
+            } lfs_stat;
         ]])
         stat_syscall_num = IS_64_BIT and 106 or 195
         lstat_syscall_num = IS_64_BIT and 107 or 196
@@ -979,7 +980,7 @@ if OS == 'Linux' then
                     unsigned long   st_ctime_nsec;
                     unsigned int    __unused4;
                     unsigned int    __unused5;
-                } stat;
+                } lfs_stat;
             ]])
             stat_syscall_num = 106
             lstat_syscall_num = 107
@@ -1005,7 +1006,7 @@ if OS == 'Linux' then
                     unsigned long   st_ctime;
                     unsigned long   st_ctime_nsec;
                     unsigned long long      st_ino;
-                } stat;
+                } lfs_stat;
             ]])
             stat_syscall_num = 195
             lstat_syscall_num = 196
@@ -1033,7 +1034,7 @@ if OS == 'Linux' then
                 unsigned int    st_ctime_nsec;
                 unsigned int    __unused4;
                 unsigned int    __unused5;
-            } stat;
+            } lfs_stat;
         ]])
         stat_syscall_num = IS_64_BIT and 106 or 195
         lstat_syscall_num = IS_64_BIT and 107 or 196
@@ -1060,7 +1061,7 @@ if OS == 'Linux' then
                 unsigned long   __st_pad2;
                 long long       st_blocks;
                 long __st_padding4[14];
-            } stat;
+            } lfs_stat;
         ]])
         stat_syscall_num = IS_64_BIT and 4106 or 4213
         lstat_syscall_num = IS_64_BIT and 4107 or 4214
@@ -1074,7 +1075,7 @@ if OS == 'Linux' then
             return lib.syscall(lstat_syscall_num, filepath, buf)
         end
     else
-        ffi.cdef('typedef struct {} stat;')
+        ffi.cdef('typedef struct {} lfs_stat;')
         stat_func = function() error("TODO support other Linux architectures") end
         lstat_func = stat_func
     end
@@ -1093,10 +1094,10 @@ elseif OS == 'Windows' then
             __time64_t          st_atime;
             __time64_t          st_mtime;
             __time64_t          st_ctime;
-        } stat;
+        } lfs_stat;
 
-        int _stat64(const char *path, stat *buffer);
-        int _wstat64(const wchar_t *path, stat *buffer);      
+        int _stat64(const char *path, lfs_stat *buffer);
+        int _wstat64(const wchar_t *path, lfs_stat *buffer);      
     ]])
 
     stat_func = function(filepath, buf)
@@ -1110,7 +1111,7 @@ elseif OS == 'Windows' then
     lstat_func = stat_func
 elseif OS == 'OSX' then
     ffi.cdef([[
-        struct timespec {
+        struct lfs_timespec {
             time_t tv_sec;
             long tv_nsec;
         };
@@ -1122,10 +1123,10 @@ elseif OS == 'OSX' then
             uint32_t           st_uid;
             uint32_t           st_gid;
             uint32_t           st_rdev;
-            struct timespec st_atimespec;
-            struct timespec st_mtimespec;
-            struct timespec st_ctimespec;
-            struct timespec st_birthtimespec;
+            struct lfs_timespec st_atimespec;
+            struct lfs_timespec st_mtimespec;
+            struct lfs_timespec st_ctimespec;
+            struct lfs_timespec st_birthtimespec;
             int64_t           st_size;
             int64_t        st_blocks;
             int32_t       st_blksize;
@@ -1133,14 +1134,14 @@ elseif OS == 'OSX' then
             uint32_t        st_gen;
             int32_t         st_lspare;
             int64_t         st_qspare[2];
-        } stat;
-        int stat64(const char *path, stat *buf);
-        int lstat64(const char *path, stat *buf);
+        } lfs_stat;
+        int stat64(const char *path, lfs_stat *buf);
+        int lstat64(const char *path, lfs_stat *buf);
     ]])
     stat_func = lib.stat64
     lstat_func = lib.lstat64
 else
-    ffi.cdef('typedef struct {} stat;')
+    ffi.cdef('typedef struct {} lfs_stat;')
     stat_func = function() error('TODO: support other posix system') end
     lstat_func = stat_func
 end
@@ -1241,7 +1242,7 @@ local mt = {
         return func and func(self)
     end
 }
-local stat_type = ffi.metatype('stat', mt)
+local stat_type = ffi.metatype('lfs_stat', mt)
 
 local function attributes(filepath, attr, follow_symlink)
     local buf = ffi.new(stat_type)
