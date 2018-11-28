@@ -394,13 +394,20 @@ if OS == "Windows" then
             intptr_t _wfindfirst(  
             const wchar_t *filespec,  
             struct _wfinddata_t *fileinfo   
+            );
+            intptr_t _wfindfirst32(  
+                const wchar_t *filespec,  
+                struct _wfinddata32_t *fileinfo
             );  
             
             int _wfindnext(  
                 intptr_t handle,  
                 struct _wfinddata_t *fileinfo   
             );  
-            
+            int _wfindnext32(  
+                intptr_t handle,  
+                struct _wfinddata32_t *fileinfo   
+            );  
             int _findclose(int handle);
         ]])
         local ok
@@ -408,10 +415,11 @@ if OS == "Windows" then
         if not ok then findfirst = lib._findfirst end
         ok,findnext = pcall(function() return lib._findnext32 end)
         if not ok then findnext = lib._findnext end
-
         ok,wfindfirst = pcall(function() return lib._wfindfirst end)
-		if not ok then HAVE_WFINDFIRST = false end
-		ok,wfindnext = pcall(function() return lib._wfindnext end)
+        if not ok then ok,wfindfirst = pcall(function() return lib._wfindfirst32 end) end
+        if not ok then HAVE_WFINDFIRST = false end
+        ok,wfindnext = pcall(function() return lib._wfindnext end)
+        if not ok then ok,wfindnext = pcall(function() return lib._wfindnext32 end) end
     end
 
     local function findclose(dentry)
