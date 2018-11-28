@@ -33,6 +33,7 @@ local OS = ffi.os
 -- sys/syslimits.h
 local MAXPATH
 local MAXPATH_UNC = 32760
+local HAVE_WFINDFIRST = true
 local wchar_t
 local win_utf8_to_unicode
 local win_unicode_to_utf8
@@ -408,8 +409,9 @@ if OS == "Windows" then
         ok,findnext = pcall(function() return lib._findnext32 end)
         if not ok then findnext = lib._findnext end
 
-        wfindfirst = lib._wfindfirst
-        wfindnext = lib._wfindnext
+        ok,wfindfirst = pcall(function() return lib._wfindfirst end)
+		if not ok then HAVE_WFINDFIRST = false end
+		ok,wfindnext = pcall(function() return lib._wfindnext end)
     end
 
     local function findclose(dentry)
@@ -1283,7 +1285,7 @@ function _M.symlinkattributes(filepath, attr)
     return attributes(filepath, attr, false)
 end
 
-_M.unicode = true
+_M.unicode = HAVE_WFINDFIRST
 _M.unicode_errors = false
 --this would error with _M.unicode_errors = true
 --local cad = string.char(0xE0,0x80,0x80)--,0xFD,0xFF)
