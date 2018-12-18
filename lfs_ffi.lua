@@ -397,7 +397,7 @@ if OS == "Windows" then
             );
             intptr_t _wfindfirst32(  
                 const wchar_t *filespec,  
-                struct _wfinddata32_t *fileinfo
+                struct _wfinddata_t *fileinfo
             );  
             
             int _wfindnext(  
@@ -406,7 +406,7 @@ if OS == "Windows" then
             );  
             int _wfindnext32(  
                 intptr_t handle,  
-                struct _wfinddata32_t *fileinfo   
+                struct _wfinddata_t *fileinfo   
             );  
             int _findclose(int handle);
         ]])
