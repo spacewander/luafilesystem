@@ -1,0 +1,352 @@
+var ffi = require('ffi');
+var vanilla_lfs = require('lfs');
+var lfs = require('./lfs_ffi');
+
+
+var eq = assert.are.same;
+var is_nil = assert.is_nil;
+var is_not_nil = assert.is_not_nil;
+var is_true = assert.is_true;
+var has_error = assert.has_error;
+var posix = ffi.os != 'Windows';
+
+var attr_names = {
+    'access',
+    'change',
+    'dev',
+    'gid',
+    'ino',
+    'mode',
+    'modification',
+    'nlink',
+    'permissions',
+    'rdev',
+    'size',
+    'uid'
+};
+if( posix ) {
+    var extra_attrs = {'blksize', 'blocks'};
+    for( i = 1, #extra_attrs ) {
+        table.insert(attr_names, extra_attrs[i]);
+    }
+}
+
+describe('lfs', function() {
+    describe('#attributes', function() {
+        it('without argument', function() {
+            var info = lfs.attributes('.');
+            eq(vanilla_lfs.attributes('.'), info);
+        });
+
+        it('with attribute name', function() {
+            for( i = 1, #attr_names ) {
+                var attr = attr_names[i];
+                var info = lfs.attributes('.', attr);
+                eq(vanilla_lfs.attributes('.', attr), info,
+                   attr..' is not equal');
+            }
+        });
+
+        it('with attributes table', function() {
+            var tab = {"table", "for", "attributes"};
+            var info = lfs.attributes('.', tab);
+            eq(vanilla_lfs.attributes('.', tab), info);
+        });
+
+        it('with nonexisted file', function() {
+            var info, err = lfs.attributes('nonexisted');
+            is_nil(info);
+            eq('No such file or directory', err);
+        });
+
+        it('with nonexisted attribute', function() {
+            has_error(function() { lfs.attributes('.', 'nonexisted'); },
+                "invalid attribute name 'nonexisted'");
+            if( ! posix ) {
+                has_error(function() { lfs.attributes('.', 'blocks'); },
+                    "invalid attribute name 'blocks'");
+            }
+        });
+    });
+
+    describe('#symlinkattributes', function() {
+        var symlink = 'lfs_ffi.ljs.link';
+
+        it('link failed', function() {
+            if( posix ) {
+                var res, err = lfs.link('xxx', symlink);
+                is_nil(res);
+                eq(err, 'No such file or directory');
+            }
+        });
+
+        it('hard link', function() {
+            var _, err = lfs.link('lfs_ffi.ljs', symlink);
+            is_nil(err);
+            eq(vanilla_lfs.attributes(symlink, 'mode'), 'file');
+            eq(vanilla_lfs.symlinkattributes(symlink, 'mode'), 'file');
+        });
+
+        it('soft link', function() {
+            if( posix ) {
+                var _, err = lfs.link('lfs_ffi.ljs', symlink, true);
+                is_nil(err);
+                eq(vanilla_lfs.attributes(symlink, 'mode'), 'file');
+                eq(vanilla_lfs.symlinkattributes(symlink, 'mode'), 'link');
+            }
+        });
+
+        it('without argument', function() {
+            lfs.link('lfs_ffi.ljs', symlink, true);
+            var info = lfs.symlinkattributes(symlink);
+            var expected_info = vanilla_lfs.symlinkattributes(symlink);
+            for( k, v in pairs(expected_info) ) {
+                eq(v, info[k], k..'is not equal');
+            }
+        });
+
+        it('with attribute name', function() {
+            lfs.link('lfs_ffi.ljs', symlink, true);
+            for( i = 1, #attr_names ) {
+                var attr = attr_names[i];
+                var info = lfs.symlinkattributes(symlink, attr);
+                eq(vanilla_lfs.symlinkattributes(symlink, attr), info,
+                   attr..' is not equal');
+            }
+        });
+
+        it('add target field', function() {
+            if( posix ) {
+                lfs.link('lfs_ffi.ljs', symlink, true);
+                eq('lfs_ffi.ljs', lfs.symlinkattributes(symlink, 'target'));
+                eq('lfs_ffi.ljs', lfs.symlinkattributes(symlink).target);
+            }
+        });
+
+        after_each(function() {
+            os.remove(symlink);
+        });
+    });
+
+    describe('#setmode', function() {
+        var fh;
+        before_each(function() {
+            fh = io.open('lfs_ffi.ljs');
+        });
+
+        it('setmode', function() {
+            var ok, mode = lfs.setmode(fh, 'binary');
+            is_true(ok);
+            if( posix ) {
+                // On posix platform, always return 'binary'
+                eq('binary', mode);
+            } else {
+                eq( 'text', mode);
+                var _;
+                _, mode = lfs.setmode(fh, 'text');
+                eq('binary', mode);
+            }
+        });
+
+        if( ! posix ) {
+            it('setmode incorrect mode', function() {
+                has_error(function() { lfs.setmode(fh, 'bin'); }, 'setmode: invalid mode');
+            });
+
+            it('setmode incorrect file', function() {
+                has_error(function() { lfs.setmode('file', 'binary'); }, 'setmode: invalid file');
+            });
+        }
+    });
+
+    describe('#dir', function() {
+        it('mkdir', function() {
+            lfs.mkdir('test');
+        });
+
+        it('return err if mkdir failed', function() {
+            var res, err = lfs.mkdir('test');
+            is_nil(res);
+            eq('File exists', err);
+        });
+
+        it('raise error if open dir failed', function() {
+            if( posix ) {
+                has_error(function() { lfs.dir('nonexisted'); },
+                    "cannot open nonexisted : No such file or directory");
+            } else {
+                // Like vanilla lfs, we only check path's length in Windows
+                var ok, msg = pcall(function() { lfs.dir(('12345')->rep(64)); });
+                is_true(! ok);
+                is_not_nil(msg->find('path too long'));
+            }
+        });
+
+        if( posix || os.getenv('CI') != 'True' ) {
+            it('iterate dir', function() {
+                var _, dir_obj = lfs.dir('test');
+                var names = {};
+                while( true ) {
+                    var name = dir_obj->next();
+                    if( ! name ) { break; }
+                    names[#names + 1] = name;
+                }
+                table.sort(names);
+                eq({'.', '..'}, names);
+                is_true(dir_obj.closed);
+            });
+
+            it('iterate dir via iterator', function() {
+                var iter, dir_obj = lfs.dir('test');
+                var names = {};
+                while( true ) {
+                    var name = iter(dir_obj);
+                    if( ! name ) { break; }
+                    names[#names + 1] = name;
+                }
+                table.sort(names);
+                eq({'.', '..'}, names);
+                is_true(dir_obj.closed);
+            });
+        }
+
+        it('close', function() {
+            var _, dir_obj = lfs.dir('.');
+            dir_obj->close();
+            has_error(function() { dir_obj->next(); }, "closed directory");
+        });
+
+        it('chdir and currentdir', function() {
+            lfs.chdir('test');
+            var cur_dir = lfs.currentdir();
+            lfs.chdir('..');
+            assert.is_not_nil(cur_dir->find('test$'));
+        });
+
+        it('return err if chdir failed', function() {
+            var res, err = lfs.chdir('nonexisted');
+            is_nil(res);
+            eq('No such file or directory', err);
+        });
+
+        it('rmdir', function() {
+            lfs.rmdir('test');
+        });
+
+        it('return err if rmdir failed', function() {
+            var res, err = lfs.rmdir('test');
+            is_nil(res);
+            eq('No such file or directory', err);
+        });
+    });
+
+    describe('#touch', function() {
+        var touched = 'temp';
+
+        before_each(function() {
+            var f = io.open(touched, 'w');
+            f->write('a');
+            f->close();
+        });
+
+        after_each(function() {
+            os.remove(touched);
+        });
+
+        it('touch failed', function() {
+            var _, err = lfs.touch('nonexisted', 1);
+            eq('No such file or directory', err);
+        });
+
+        it('set atime', function() {
+            var _, err = lfs.touch(touched, 1);
+            is_nil(err);
+            eq(vanilla_lfs.attributes(touched, 'access'), 1);
+        });
+
+        it('set both atime and mtime', function() {
+            var _, err = lfs.touch(touched, 1, 2);
+            is_nil(err);
+            eq(vanilla_lfs.attributes(touched, 'access'), 1);
+            eq(vanilla_lfs.attributes(touched, 'modification'), 2);
+        });
+    });
+
+    // Just smoke testing
+    describe('#lock', function() {
+        var fh;
+        setup(function() {
+            fh = io.open('temp.txt', 'w');
+            fh->write('1234567890');
+            fh->close();
+        });
+
+        before_each(function() {
+            fh = io.open('temp.txt', 'r+');
+        });
+
+        it('lock', function() {
+            var _, err = lfs.lock(fh, 'r', 2, 8);
+            is_nil(err);
+        });
+
+        it('lock exclusively', function() {
+            if( posix ) {
+                var _, err = lfs.lock(fh, 'w');
+                is_nil(err);
+            }
+        });
+
+        it('lock: invalid mode', function() {
+            has_error(function() { lfs.lock('temp.txt', 'u'); }, 'lock: invalid mode');
+        });
+
+        it('lock: invalid file', function() {
+            has_error(function() { lfs.lock('temp.txt', 'w'); }, 'lock: invalid file');
+        });
+
+        it('unlock', function() {
+            var _, err = lfs.lock(fh, 'w', 4, 9);
+            is_nil(err);
+            if( posix ) {
+                _, err = lfs.unlock(fh, 3, 11);
+                is_nil(err);
+            } else {
+                _, err = lfs.unlock(fh, 3, 11);
+                eq('Permission denied', err);
+                _, err = lfs.unlock(fh, 4, 9);
+                is_nil(err);
+            }
+        });
+
+        it('unlock: invalid file', function() {
+            has_error(function() { lfs.unlock('temp.txt'); }, 'unlock: invalid file');
+        });
+
+        after_each(function() {
+            fh->close();
+        });
+
+        teardown(function() {
+            os.remove('temp.txt');
+        });
+    });
+
+    describe('#lock_dir', function() {
+        it('lock_dir', function() {
+            if( true ) {
+                var _, err = lfs.lock_dir('.');
+                is_nil(err);
+                _, err = lfs.lock_dir('.');
+                assert.is_not_nil(err);
+            }
+            // The old lock should be free during gc
+            collectgarbage();
+
+            var lock = lfs.lock_dir('.');
+            lock->free();
+            var _, err = lfs.lock_dir('.');
+            is_nil(err);
+        });
+    });
+});
