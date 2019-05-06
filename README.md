@@ -1,10 +1,11 @@
 # luafilesystem
 
 [![Build Status](https://travis-ci.org/spacewander/luafilesystem.svg?branch=master)](https://travis-ci.org/spacewander/luafilesystem)
-[![Build status](https://ci.appveyor.com/api/projects/status/52d2x1frvksf4u1h/branch/master?svg=true)](https://ci.appveyor.com/project/spacewander/luafilesystem/branch/master)
-
 
 Reimplement luafilesystem via LuaJIT FFI.
+
+This project doesn't support Windows. If you need the Windows support, use
+https://github.com/sonoro1234/luafilesystem instead.
 
 ## Docs
 
