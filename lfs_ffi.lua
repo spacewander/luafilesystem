@@ -1231,13 +1231,14 @@ if OS == 'Windows' then
         return nil
     end
 else
-    ffi.cdef('unsigned long readlink(const char *path, char *buf, size_t bufsize);')
+    ffi.cdef('ssize_t readlink(const char *path, char *buf, size_t bufsize);')
     function get_link_target_path(link_path)
         local size = MAXPATH
         while true do
             local buf = ffi.new('char[?]', size)
             local read = lib.readlink(link_path, buf, size)
             if read == -1 then
+                error(errno(),2)
                 return nil, errno()
             end
             if read < size then
