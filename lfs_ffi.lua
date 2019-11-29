@@ -612,31 +612,6 @@ local attr_handlers = {
     size = function(st) return tonumber(st.st_size) end,
     uid = function(st) return tonumber(st.st_uid) end,
 }
-
--- Add target field for symlinkattributes, which is the absolute path of linked target
-local get_link_target_path
-if OS == 'Windows' then
-    function get_link_target_path()
-        return nil
-    end
-else
-    ffi.cdef('unsigned long readlink(const char *path, char *buf, size_t bufsize);')
-    function get_link_target_path(link_path)
-        local size = MAXPATH
-        while true do
-            local buf = ffi_new('char[?]', size)
-            local read = lib.readlink(link_path, buf, size)
-            if read == -1 then
-                return nil, errno()
-            end
-            if read < size then
-                return ffi_str(buf)
-            end
-            size = size * 2
-        end
-    end
-end
-
 local mt = {
     __index = function(self, attr_name)
         local func = attr_handlers[attr_name]
@@ -645,20 +620,47 @@ local mt = {
 }
 local stat_type = ffi.metatype('stat', mt)
 
+-- Add target field for symlinkattributes, which is the absolute path of linked target
+local get_link_target_path
+if OS == 'Windows' then
+    local ENOSYS = 40
+    function get_link_target_path()
+        return nil, "could not obtain link target: Function not implemented ",ENOSYS
+    end
+else
+    ffi.cdef('ssize_t readlink(const char *path, char *buf, size_t bufsize);')
+    function get_link_target_path(link_path, statbuf)
+        local size = statbuf.st_size
+        size = size == 0 and MAXPATH or size
+        local buf = ffi.new('char[?]', size + 1)
+        local read = lib.readlink(link_path, buf, size)
+        if read == -1 then
+            return nil, "could not obtain link target: "..errno(), ffi.errno()
+        end
+        if read > size then
+            return nil, "not enought size for readlink: "..errno(), ffi.errno()
+        end
+        buf[size] = 0
+        return ffi_str(buf)
+    end
+end
+
+local stat_buf = ffi.new(stat_type)
 local function attributes(filepath, attr, follow_symlink)
-    local buf = ffi_new(stat_type)
     local func = follow_symlink and stat_func or lstat_func
-    if func(filepath, buf) == -1 then
-        return nil, errno()
+    if func(filepath, stat_buf) == -1 then
+        return nil, string.format("cannot obtain information from file '%s' : %s",
+                                  tostring(filepath),errno()), ffi.errno()
     end
 
     local atype = type(attr)
     if atype == 'string' then
-        local value
+        local value, err, errn
         if attr == 'target' and not follow_symlink then
-            value = get_link_target_path(filepath)
+            value, err, errn = get_link_target_path(filepath, stat_buf)
+            return value, err, errn
         else
-            value = buf[attr]
+            value = stat_buf[attr]
         end
         if value == nil then
             error("invalid attribute name '" .. attr .. "'")
@@ -667,10 +669,10 @@ local function attributes(filepath, attr, follow_symlink)
     else
         local tab = (atype == 'table') and attr or {}
         for k, _ in pairs(attr_handlers) do
-            tab[k] = buf[k]
+            tab[k] = stat_buf[k]
         end
         if not follow_symlink then
-            tab.target = get_link_target_path(filepath)
+            tab.target = get_link_target_path(filepath, stat_buf)
         end
         return tab
     end

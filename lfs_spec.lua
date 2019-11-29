@@ -57,7 +57,7 @@ describe('lfs', function()
         it('with nonexisted file', function()
             local info, err = lfs.attributes('nonexisted')
             is_nil(info)
-            eq('No such file or directory', err)
+            eq("cannot obtain information from file 'nonexisted' : No such file or directory", err)
         end)
 
         it('with nonexisted attribute', function()
