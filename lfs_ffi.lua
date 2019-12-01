@@ -1223,6 +1223,13 @@ local attr_handlers = {
     size = function(st) return tonumber(st.st_size) end,
     uid = function(st) return tonumber(st.st_uid) end,
 }
+local mt = {
+    __index = function(self, attr_name)
+        local func = attr_handlers[attr_name]
+        return func and func(self)
+    end
+}
+local stat_type = ffi.metatype('lfs_stat', mt)
 
 -- Add target field for symlinkattributes, which is the absolute path of linked target
 local get_link_target_path
@@ -1233,29 +1240,26 @@ if OS == 'Windows' then
 else
     ffi.cdef('ssize_t readlink(const char *path, char *buf, size_t bufsize);')
     function get_link_target_path(link_path)
-        local size = MAXPATH
-        while true do
-            local buf = ffi.new('char[?]', size)
-            local read = lib.readlink(link_path, buf, size)
-            if read == -1 then
-                error(errno(),2)
-                return nil, errno()
-            end
-            if read < size then
-                return ffi_str(buf)
-            end
-            size = size * 2
+        local statbuf = ffi.new(stat_type)
+        if lstat_func(link_path, statbuf) == -1 then
+            error(errno(),2)
         end
+        local size = statbuf.st_size
+        local buf = ffi.new('char[?]', size + 1)
+        local read = lib.readlink(link_path, buf, size)
+        if read == -1 then
+            --einval when link_path is not a link
+            if ffi.errno()~=22 then error(errno(),2) end
+            return nil, errno()
+        end
+        if read > size then
+            error("not enought size for readlink "..errno(),2)
+        end
+        buf[size] = 0
+        return ffi_str(buf)
     end
 end
 
-local mt = {
-    __index = function(self, attr_name)
-        local func = attr_handlers[attr_name]
-        return func and func(self)
-    end
-}
-local stat_type = ffi.metatype('lfs_stat', mt)
 
 local function attributes(filepath, attr, follow_symlink)
     local buf = ffi.new(stat_type)
