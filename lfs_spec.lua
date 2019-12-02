@@ -334,19 +334,15 @@ describe('lfs', function()
 
     describe('#lock_dir', function()
         it('lock_dir', function()
-            if true then
-                local _, err = lfs.lock_dir('.')
-                is_nil(err)
-                _, err = lfs.lock_dir('.')
-                assert.is_not_nil(err)
-            end
-            -- The old lock should be free during gc
-            collectgarbage()
-
-            local lock = lfs.lock_dir('.')
+            local lock, err = lfs.lock_dir('.')
+            is_nil(err)
             lock:free()
+            -- lock again after unlock
             local _, err = lfs.lock_dir('.')
             is_nil(err)
+            -- lock again without unlock
+            local _, err = lfs.lock_dir('.')
+            is_not_nil(err)
         end)
     end)
 end)
