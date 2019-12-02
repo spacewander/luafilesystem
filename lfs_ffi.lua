@@ -1239,17 +1239,15 @@ if OS == 'Windows' then
     end
 else
     ffi.cdef('ssize_t readlink(const char *path, char *buf, size_t bufsize);')
-    function get_link_target_path(link_path)
-        local statbuf = ffi.new(stat_type)
-        if lstat_func(link_path, statbuf) == -1 then
-            error(errno(),2)
-        end
+    local EINVAL = 22
+    function get_link_target_path(link_path, statbuf)
         local size = statbuf.st_size
+        size = size == 0 and MAXPATH or size
         local buf = ffi.new('char[?]', size + 1)
         local read = lib.readlink(link_path, buf, size)
         if read == -1 then
             --einval when link_path is not a link
-            if ffi.errno()~=22 then error(errno(),2) end
+            if ffi.errno()~=EINVAL then error(errno(),2) end
             return nil, errno()
         end
         if read > size then
@@ -1265,6 +1263,7 @@ local function attributes(filepath, attr, follow_symlink)
     local buf = ffi.new(stat_type)
     local func = follow_symlink and stat_func or lstat_func
     if func(filepath, buf) == -1 then
+        error(errno(),2)
         return nil, errno()
     end
 
@@ -1272,7 +1271,7 @@ local function attributes(filepath, attr, follow_symlink)
     if atype == 'string' then
         local value
         if attr == 'target' and not follow_symlink then
-            value = get_link_target_path(filepath)
+            value = get_link_target_path(filepath, buf)
         else
             value = buf[attr]
         end
@@ -1286,7 +1285,7 @@ local function attributes(filepath, attr, follow_symlink)
             tab[k] = buf[k]
         end
         if not follow_symlink then
-            tab.target = get_link_target_path(filepath)
+            tab.target = get_link_target_path(filepath, buf)
         end
         return tab
     end
