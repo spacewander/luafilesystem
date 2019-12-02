@@ -334,14 +334,15 @@ describe('lfs', function()
 
     describe('#lock_dir', function()
         it('lock_dir', function()
-            local lock, err = lfs.lock_dir('.')
+            local lock, err, _
+            lock, err = lfs.lock_dir('.')
             is_nil(err)
             lock:free()
             -- lock again after unlock
-            local _, err = lfs.lock_dir('.')
+            _, err = lfs.lock_dir('.')
             is_nil(err)
             -- lock again without unlock
-            local _, err = lfs.lock_dir('.')
+            _, err = lfs.lock_dir('.')
             is_not_nil(err)
         end)
     end)
