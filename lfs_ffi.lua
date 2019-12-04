@@ -1234,8 +1234,9 @@ local stat_type = ffi.metatype('lfs_stat', mt)
 -- Add target field for symlinkattributes, which is the absolute path of linked target
 local get_link_target_path
 if OS == 'Windows' then
+    local ENOSYS = 40
     function get_link_target_path()
-        return nil
+        return nil, "could not obtain link target: Function not implemented ",ENOSYS
     end
 else
     ffi.cdef('ssize_t readlink(const char *path, char *buf, size_t bufsize);')
@@ -1246,32 +1247,29 @@ else
         local buf = ffi.new('char[?]', size + 1)
         local read = lib.readlink(link_path, buf, size)
         if read == -1 then
-            --einval when link_path is not a link
-            if ffi.errno()~=EINVAL then error(errno(),2) end
-            return nil, errno()
+            return nil, "could not obtain link target: "..errno(), ffi.errno()
         end
         if read > size then
-            error("not enought size for readlink "..errno(),2)
+            return nil, "not enought size for readlink: "..errno(), ffi.errno()
         end
         buf[size] = 0
         return ffi_str(buf)
     end
 end
 
-
+local buf = ffi.new(stat_type)
 local function attributes(filepath, attr, follow_symlink)
-    local buf = ffi.new(stat_type)
     local func = follow_symlink and stat_func or lstat_func
     if func(filepath, buf) == -1 then
-        error(errno(),2)
-        return nil, errno()
+        return nil, string.format("cannot obtain information from file '%s' : %s",tostring(filepath),errno()), ffi.errno()
     end
 
     local atype = type(attr)
     if atype == 'string' then
-        local value
+        local value, err, errn
         if attr == 'target' and not follow_symlink then
-            value = get_link_target_path(filepath, buf)
+            value, err, errn = get_link_target_path(filepath, buf)
+            return value, err, errn
         else
             value = buf[attr]
         end
