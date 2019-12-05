@@ -9,6 +9,7 @@ local is_not_nil = assert.is_not_nil
 local is_true = assert.is_true
 local has_error = assert.has_error
 local posix = ffi.os ~= 'Windows'
+local linux = ffi.os == 'Linux'
 
 local attr_names = {
     'access',
@@ -120,6 +121,15 @@ describe('lfs', function()
                 lfs.link('lfs_ffi.lua', symlink, true)
                 eq('lfs_ffi.lua', lfs.symlinkattributes(symlink, 'target'))
                 eq('lfs_ffi.lua', lfs.symlinkattributes(symlink).target)
+            end
+        end)
+
+        it('link with pseudo file', function()
+            if linux then
+                local pseudo_filename =  '/proc/self'
+                lfs.link(pseudo_filename, symlink, true)
+                eq(pseudo_filename, lfs.symlinkattributes(symlink, 'target'))
+                eq(pseudo_filename, lfs.symlinkattributes(symlink).target)
             end
         end)
 
