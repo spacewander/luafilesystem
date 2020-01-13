@@ -348,9 +348,9 @@ if OS == "Windows" then
                 uint64_t  size;
                 char      name[]] .. MAXPATH ..[[];
             } _finddata_t;
-            int _findfirst64(const char *filespec, _finddata_t *fileinfo);
-            int _findnext64(int handle, _finddata_t *fileinfo);
-            int _findclose(int handle);
+            intptr_t _findfirst64(const char *filespec, _finddata_t *fileinfo);
+            int _findnext64(intptr_t handle, _finddata_t *fileinfo);
+            int _findclose(intptr_t handle);
             typedef struct _wfinddata_t { //is _wfinddata64_t
                 uint64_t  attrib;
                 uint64_t  time_create;
@@ -377,11 +377,11 @@ if OS == "Windows" then
                 uint32_t  size;
                 char      name[]] .. MAXPATH ..[[];
             } _finddata_t;
-            int _findfirst32(const char* filespec, _finddata_t* fileinfo);
-            int _findnext32(int handle, _finddata_t *fileinfo);
+            intptr_t _findfirst32(const char* filespec, _finddata_t* fileinfo);
+            int _findnext32(intptr_t handle, _finddata_t *fileinfo);
             
-            int _findfirst(const char* filespec, _finddata_t* fileinfo);
-            int _findnext(int handle, _finddata_t *fileinfo);
+            intptr_t _findfirst(const char* filespec, _finddata_t* fileinfo);
+            int _findnext(intptr_t handle, _finddata_t *fileinfo);
             
             typedef struct _wfinddata_t {
                 uint32_t  attrib;
@@ -408,7 +408,7 @@ if OS == "Windows" then
                 intptr_t handle,  
                 struct _wfinddata_t *fileinfo   
             );  
-            int _findclose(int handle);
+            int _findclose(intptr_t handle);
         ]])
         local ok
         ok,findfirst = pcall(function() return lib._findfirst32 end)
@@ -429,7 +429,7 @@ if OS == "Windows" then
         end
     end
 
-    local dir_type = ffi.metatype("struct {int handle;}", {
+    local dir_type = ffi.metatype("struct {intptr_t handle;}", {
         __gc = findclose
     })
 
