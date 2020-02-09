@@ -1239,7 +1239,10 @@ if OS == 'Windows' then
         return nil, "could not obtain link target: Function not implemented ",ENOSYS
     end
 else
-    ffi.cdef('ssize_t readlink(const char *path, char *buf, size_t bufsize);')
+    ffi.cdef([[
+        typedef int ssize_t;
+        ssize_t readlink(const char *path, char *buf, size_t bufsize);
+    ]])
     local EINVAL = 22
     function get_link_target_path(link_path, statbuf)
         local size = statbuf.st_size
