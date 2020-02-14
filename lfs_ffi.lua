@@ -29,7 +29,7 @@ local ERANGE = 'Result too large'
 
 if not pcall(ffi.typeof, "ssize_t") then
     -- LuaJIT 2.0 doesn't have ssize_t as a builtin type, let's define it
-    ffi.cdef("typedef long ssize_t")
+    ffi.cdef("typedef intptr_t ssize_t")
 end
 
 ffi.cdef([[
