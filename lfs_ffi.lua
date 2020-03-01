@@ -1157,6 +1157,36 @@ elseif OS == 'OSX' then
     ]])
     stat_func = lib.stat64
     lstat_func = lib.lstat64
+elseif OS == 'BSD' then
+    ffi.cdef([[
+        struct lfs_timespec {
+            time_t tv_sec;
+            long tv_nsec;
+        };
+        typedef struct {
+            uint32_t           st_dev;
+            uint32_t         st_ino;
+            uint16_t          st_mode;
+            uint16_t         st_nlink;
+            uint32_t           st_uid;
+            uint32_t           st_gid;
+            uint32_t           st_rdev;
+            struct lfs_timespec st_atimespec;
+            struct lfs_timespec st_mtimespec;
+            struct lfs_timespec st_ctimespec;
+            int64_t           st_size;
+            int64_t        st_blocks;
+            int32_t       st_blksize;
+            uint32_t        st_flags;
+            uint32_t        st_gen;
+            int32_t         st_lspare;
+            struct lfs_timespec st_birthtimespec;
+        } lfs_stat;
+        int stat(const char *path, lfs_stat *buf);
+        int lstat(const char *path, lfs_stat *buf);
+    ]])
+    stat_func = lib.stat
+    lstat_func = lib.lstat
 else
     ffi.cdef('typedef struct {} lfs_stat;')
     stat_func = function() error('TODO: support other posix system') end
