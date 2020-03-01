@@ -21,6 +21,11 @@ local _M = {
 local IS_64_BIT = ffi.abi('64bit')
 local ERANGE = 'Result too large'
 
+if not pcall(ffi.typeof, "ssize_t") then
+    -- LuaJIT 2.0 doesn't have ssize_t as a builtin type, let's define it
+    ffi.cdef("typedef intptr_t ssize_t")
+end
+
 ffi.cdef([[
     char* strerror(int errnum);
 ]])
@@ -1239,9 +1244,7 @@ if OS == 'Windows' then
         return nil, "could not obtain link target: Function not implemented ",ENOSYS
     end
 else
-    if jit.version_num < 20100 then
-        ffi.cdef('typedef int ssize_t;')
-    end
+
     ffi.cdef('ssize_t readlink(const char *path, char *buf, size_t bufsize);')
     local EINVAL = 22
     function get_link_target_path(link_path, statbuf)
