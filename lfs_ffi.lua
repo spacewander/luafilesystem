@@ -186,24 +186,23 @@ local function iterator(dir)
     end
 end
 
-local dir_obj_type = ffi.metatype([[
-    struct {
-        DIR *_dentry;
-        bool closed;
-    }
-]],
-{__index = {
+
+local dir_obj_mt = {__index = {
     next = iterator,
     close = close,
 }, __gc = close
-})
+}
+
+local dir_obj_type = function()
+    return setmetatable({},dir_obj_mt)
+end
 
 function _M.dir(path)
     local dentry = lib.opendir(path)
     if dentry == nil then
         error("cannot open "..path.." : "..errno())
     end
-    local dir_obj = ffi_new(dir_obj_type)
+    local dir_obj = dir_obj_type()
     dir_obj._dentry = dentry
     dir_obj.closed = false;
     return iterator, dir_obj
