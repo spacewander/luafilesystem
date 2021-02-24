@@ -451,7 +451,6 @@ if OS == "Windows" then
             dir._dentry.handle = findfirst(dir._pattern, entry)
             if dir._dentry.handle == -1 then
                 dir.closed = true
-                error(dir._pattern..": "..errno(),2)
                 return nil, errno()
             end
             return ffi_str(entry.name)
@@ -473,7 +472,6 @@ if OS == "Windows" then
             dir._dentry.handle = wfindfirst(szPattern, entry)
             if dir._dentry.handle == -1 then
                 dir.closed = true
-                error(dir._pattern..": "..errno(),2)
                 return nil, errno()
             end
             local szName = win_unicode_to_utf8(entry.name)--, -1, szName, 512);
