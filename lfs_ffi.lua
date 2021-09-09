@@ -447,6 +447,33 @@ if OS == 'Linux' then
             stat_syscall_num = 195
             lstat_syscall_num = 196
         end
+    elseif ARCH == 'ppc64le' then
+        ffi.cdef([[
+            typedef struct {
+                unsigned long st_dev;
+                unsigned long st_ino;
+                unsigned long st_nlink;
+                unsigned int    st_mode;
+                unsigned int    st_uid;
+                unsigned int    st_gid;
+                int             __pad2;
+                unsigned long st_rdev;
+                long       st_size;
+                long       st_blksize;
+                long       st_blocks;
+                long       st_atime;
+                long       st_atime_nsec;
+                long       st_mtime;
+                long       st_mtime_nsec;
+                long       st_ctime;
+                long       st_ctime_nsec;
+                unsigned long __unused4;
+                unsigned long __unused5;
+                unsigned long __unused6;
+            } stat;
+        ]])
+        stat_syscall_num = 106
+        lstat_syscall_num = 107
     elseif ARCH == 'ppc' or ARCH == 'ppcspe' then
         ffi.cdef([[
             typedef struct {
