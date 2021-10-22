@@ -392,6 +392,31 @@ if OS == 'Linux' then
         ]])
         stat_syscall_num = IS_64_BIT and 106 or 195
         lstat_syscall_num = IS_64_BIT and 107 or 196
+    elseif ARCH == 's390x' then
+        ffi.cdef([[
+            typedef struct {
+                unsigned long  st_dev;
+                unsigned long  st_ino;
+                unsigned long  st_nlink;
+                unsigned int   st_mode;
+                unsigned int   st_uid;
+                unsigned int   st_gid;
+                int            __pad1;
+                unsigned long  st_rdev;
+                long           st_size;
+                long           st_atime;
+                long           st_atime_nsec;
+                long           st_mtime;
+                long           st_mtime_nsec;
+                long           st_ctime;
+                long           st_ctime_nsec;
+                long           st_blksize;
+                long           st_blocks;
+                long           __unused[3];
+            } stat;
+        ]])
+        stat_syscall_num = 106
+        lstat_syscall_num = 107
     elseif ARCH == 'arm' then
         if IS_64_BIT then
             ffi.cdef([[
