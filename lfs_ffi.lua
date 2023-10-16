@@ -1082,7 +1082,50 @@ if OS == 'Linux' then
         lstat_syscall_num = IS_64_BIT and 4107 or 4214
     end
 
-    if stat_syscall_num then
+    if ARCH == 'arm64' then
+
+-- On arm64 stat and lstat do not exist as syscall but can be used like this
+
+        ffi.cdef([[
+            typedef struct lfs_stat {
+                unsigned long   st_dev;
+                unsigned long   st_ino;
+                unsigned int    st_mode;
+                unsigned int    st_nlink;
+                unsigned int    st_uid;
+                unsigned int    st_gid;
+                unsigned long   st_rdev;
+                unsigned long   __pad1;
+                long            st_size;
+                int             st_blksize;
+                int             __pad2;
+                long            st_blocks;
+                long            st_atime;
+                unsigned long   st_atime_nsec;
+                long            st_mtime;
+                unsigned long   st_mtime_nsec;
+                long            st_ctime;
+                unsigned long   st_ctime_nsec;
+                unsigned int    __unused4;
+                unsigned int    __unused5;
+            } lfs_stat;
+
+        int stat(const char *pathname,
+             struct lfs_stat *statbuf);
+
+        int lstat(const char *pathname,
+             struct lfs_stat *statbuf);
+
+        ]])
+
+        stat_func = function(filepath, buf)
+            return lib.stat(filepath, buf)
+        end
+        lstat_func = function(filepath, buf)
+            return lib.lstat(filepath, buf)
+        end
+
+    elseif stat_syscall_num then
         stat_func = function(filepath, buf)
             return lib.syscall(stat_syscall_num, filepath, buf)
         end
