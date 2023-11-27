@@ -43,7 +43,7 @@ local wchar_t
 local win_utf8_to_unicode
 local win_unicode_to_utf8
 if OS == 'Windows' then
-    MAXPATH = 260
+    MAXPATH = MAXPATH_UNC --260
     ffi.cdef([[
         typedef int mbstate_t;
         /*
@@ -442,45 +442,81 @@ if OS == "Windows" then
         findclose(dir._dentry)
         dir.closed = true
     end
-
+    
+    local dir_attrs = {
+        _A_ARCH = 0x20,
+        _A_HIDDEN = 0x02,
+        _A_NORMAL = 0x00,
+        _A_RDONLY = 0x01,
+        _A_SUBDIR = 0x10,
+        _A_SYSTEM = 0x04
+    }
+    
+    local function dir_attr(t,attr)
+        if not (type(attr)=="string") then --error("dir_attr must have a string") end
+			return {size = t.size, mode = (bit.band(t.attrib,dir_attrs._A_SUBDIR)~=0) and "directory" or "file"}
+		end
+        if attr=="mode" then
+            if bit.band(t.attrib,dir_attrs._A_SUBDIR)~=0 then
+                return "directory"
+            else
+                return "file"
+            end
+        elseif attr=="size" then
+            return t.size
+        end
+    end
+    
+    local dentry_type = ffi.metatype("_finddata_t",
+        {__index = {
+                attr = dir_attr
+            }
+        })
+        
     local function iterator(dir)
         if dir.closed ~= false then error("closed directory") end
-        local entry = ffi.new("_finddata_t")
         if not dir._dentry then
+            dir.entry = ffi.new(dentry_type)
             dir._dentry = ffi.new(dir_type)
-            dir._dentry.handle = findfirst(dir._pattern, entry)
+            dir._dentry.handle = findfirst(dir._pattern, dir.entry)
             if dir._dentry.handle == -1 then
                 dir.closed = true
                 return nil, errno()
             end
-            return ffi_str(entry.name)
+            return ffi_str(dir.entry.name), dir.entry
         end
 
-        if findnext(dir._dentry.handle, entry) == 0 then
-            return ffi_str(entry.name)
+        if findnext(dir._dentry.handle, dir.entry) == 0 then
+            return ffi_str(dir.entry.name), dir.entry
         end
         close(dir)
         return nil
     end
     
+    local wdentry_type = ffi.metatype("_wfinddata_t",
+        {__index = {
+                attr = dir_attr
+            },
+        })
+    
     local function witerator(dir)
         if dir.closed ~= false then error("closed directory") end
-        local entry = ffi.new("_wfinddata_t")
         if not dir._dentry then
+            dir.entry = ffi.new(wdentry_type)
             dir._dentry = ffi.new(dir_type)
             local szPattern = win_utf8_to_unicode(dir._pattern);
-            dir._dentry.handle = wfindfirst(szPattern, entry)
+            dir._dentry.handle = wfindfirst(szPattern, dir.entry)
             if dir._dentry.handle == -1 then
                 dir.closed = true
                 return nil, errno()
             end
-            local szName = win_unicode_to_utf8(entry.name)--, -1, szName, 512);
-            return ffi_str(szName)
+            local szName = win_unicode_to_utf8(dir.entry.name)--, -1, szName, 512);
+            return ffi_str(szName),dir.entry
         end
 
-        if wfindnext(dir._dentry.handle, entry) == 0 then
-            local szName = win_unicode_to_utf8(entry.name)--, -1, szName, 512);
-            return ffi_str(szName)
+        if wfindnext(dir._dentry.handle, dir.entry) == 0 then
+            local szName = win_unicode_to_utf8(dir.entry.name)--, -1, szName, 512);
+            return ffi_str(szName),dir.entry
         end
         close(dir)
         return nil
