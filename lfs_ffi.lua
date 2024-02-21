@@ -26,6 +26,7 @@ local _M = {
 -- common utils/constants
 local IS_64_BIT = ffi.abi('64bit')
 local ERANGE = 'Result too large'
+local int = ffi.typeof("int")
 
 if not pcall(ffi.typeof, "ssize_t") then
     -- LuaJIT 2.0 doesn't have ssize_t as a builtin type, let's define it
@@ -502,7 +503,48 @@ if OS == 'Linux' then
         lstat_syscall_num = IS_64_BIT and 4107 or 4214
     end
 
-    if stat_syscall_num then
+     if ARCH == 'arm64' then
+        ffi.cdef([[
+            typedef struct {
+                unsigned long   st_dev;
+                unsigned long   st_ino;
+                unsigned int    st_mode;
+                unsigned int    st_nlink;
+                unsigned int    st_uid;
+                unsigned int    st_gid;
+                unsigned long   st_rdev;
+                unsigned long   __pad1;
+                long            st_size;
+                int             st_blksize;
+                int             __pad2;
+                long            st_blocks;
+                long            st_atime;
+                unsigned long   st_atime_nsec;
+                long            st_mtime;
+                unsigned long   st_mtime_nsec;
+                long            st_ctime;
+                unsigned long   st_ctime_nsec;
+                unsigned int    __unused4;
+                unsigned int    __unused5;
+            } stat;
+        ]])
+
+        local STAT = {
+           _AT_FDCWD            = -0x64,
+           _AT_REMOVEDIR        = 0x200,
+           _AT_SYMLINK_NOFOLLOW = 0x100,
+           _AT_EACCESS          = 0x200,
+        }
+
+        -- On arm64 stat and lstat do not exist as syscall, so use newfstatat instead
+        -- int newfstatat(int dirfd, const char *filename, struct stat *statbuf, int flags)
+        stat_func = function(filepath, buf)
+            return lib.syscall(79, int(STAT._AT_FDCWD), filepath, buf, 0)
+        end
+        lstat_func = function(filepath, buf)
+            return lib.syscall(79, int(STAT._AT_FDCWD), filepath, buf, int(STAT._AT_SYMLINK_NOFOLLOW))
+        end
+    elseif stat_syscall_num then
         stat_func = function(filepath, buf)
             return lib.syscall(stat_syscall_num, filepath, buf)
         end
