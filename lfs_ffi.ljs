@@ -1,0 +1,1070 @@
+var bit = require ("bit");
+var ffi = require ("ffi");
+
+
+var pairs = pairs;
+var setmetatable = setmetatable;
+var tonumber = tonumber;
+var type = type;
+var band = bit.band;
+var rshift = bit.rshift;
+var io_type = io.type;
+var lib = ffi.C;
+var ffi_cast = ffi.cast;
+var ffi_errno = ffi.errno;
+var ffi_new = ffi.new;
+var ffi_str = ffi.string;
+var concat = table.concat;
+var has_table_new, new_tab = pcall(require, "table.new");
+if( ! has_table_new || type(new_tab) != "function" ) {
+    new_tab = function () { return {}; };
+}
+
+
+var _M = {
+    _VERSION = "0.1",
+};
+
+// common utils/constants
+var IS_64_BIT = ffi.abi('64bit');
+var ERANGE = 'Result too large';
+
+ffi.cdef([=[
+    char* strerror(int errnum);
+]=]);
+
+var function errno() {
+    return ffi_str(lib.strerror(ffi_errno()));
+}
+
+var OS = ffi.os;
+// sys/syslimits.h
+var MAXPATH;
+var wchar_t;
+if( OS == 'Windows' ) {
+    MAXPATH = 260;
+    ffi.cdef([=[
+        typedef int mbstate_t;
+        /*
+        In VC2015, M$ change the definition of mbstate_t to this and breaks the ABI.
+        */
+        typedef struct _Mbstatet
+        { // state of a multibyte translation
+            unsigned long _Wchar;
+            unsigned short _Byte, _State;
+        } _Mbstatet;
+        typedef _Mbstatet mbstate_t;
+
+        size_t mbrtowc(wchar_t* pwc,
+            const char* s,
+            size_t n,
+            mbstate_t* ps);
+    ]=]);
+
+    function wchar_t(s) {
+        var mbstate = ffi_new('mbstate_t[1]');
+        var wcs = ffi_new('wchar_t[?]', #s + 1);
+        var i = 0;
+        var offset = 0;
+        var len = #s;
+        while( true ) {
+            var processed = lib.mbrtowc(
+                wcs + i, ffi_cast('const char *', s) + offset, len, mbstate);
+            if( processed <= 0 ) { break; }
+            ++i    ;
+            offset +=   processed;
+            len -=   processed;
+        }
+        return wcs;
+    }
+
+} else if( OS == 'Linux' ) {
+    MAXPATH = 4096;
+} else {
+    MAXPATH = 1024;
+}
+
+// misc
+if( OS == "Windows" ) {
+    var utime_def;
+    if( IS_64_BIT ) {
+        utime_def = [=[
+            typedef __int64 time_t;
+            struct __utimebuf64 {
+                time_t actime;
+                time_t modtime;
+            };
+            typedef struct __utimebuf64 utimebuf;
+            int _utime64(unsigned char *file, utimebuf *times);
+        ]=];
+    } else {
+        utime_def = [=[
+            typedef __int32 time_t;
+            struct __utimebuf32 {
+                time_t actime;
+                time_t modtime;
+            };
+            typedef struct __utimebuf32 utimebuf;
+            int _utime632(unsigned char *file, utimebuf *times);
+        ]=];
+    }
+
+    ffi.cdef([=[
+        char *_getcwd(char *buf, size_t size);
+        int _chdir(const char *path);
+        int _rmdir(const char *pathname);
+        int _mkdir(const char *pathname);
+        ]=] .. utime_def .. [=[
+        typedef wchar_t* LPTSTR;
+        typedef unsigned char BOOLEAN;
+        typedef unsigned long DWORD;
+        BOOLEAN CreateSymbolicLinkW(
+            LPTSTR lpSymlinkFileName,
+            LPTSTR lpTargetFileName,
+            DWORD dwFlags
+        );
+
+        int _fileno(struct FILE *stream);
+        int _setmode(int fd, int mode);
+    ]=]);
+
+    function _M.chdir(path) {
+        if( type(path) != 'string' ) {
+            error('path should be a string');
+        }
+        if( lib._chdir(path) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.currentdir() {
+        var size = MAXPATH;
+        while( true ) {
+            var buf = ffi_new("char[?]", size);
+            if( lib._getcwd(buf, size) != null ) {
+                return ffi_str(buf);
+            }
+            var err = errno();
+            if( err != ERANGE ) {
+                return null, err;
+            }
+            size *=   2;
+        }
+    }
+
+    function _M.mkdir(path) {
+        if( type(path) != 'string' ) {
+            error('path should be a string');
+        }
+        if( lib._mkdir(path) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.rmdir(path) {
+        if( type(path) != 'string' ) {
+            error('path should be a string');
+        }
+        if( lib._rmdir(path) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.touch(path, actime, modtime) {
+        var buf;
+
+        if( type(actime) == "number" ) {
+            modtime = modtime || actime;
+            buf = ffi_new("utimebuf");
+            buf.actime  = actime;
+            buf.modtime = modtime;
+        }
+
+        var p = ffi_new("unsigned char[?]", #path + 1, path);
+        var utime = IS_64_BIT && lib._utime64 || lib._utime32;
+        if( utime(p, buf) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.setmode(file, mode) {
+        if( io_type(file) != 'file' ) {
+            error("setmode: invalid file");
+        }
+        if( mode != null && (mode != 'text' && mode != 'binary') ) {
+            error('setmode: invalid mode');
+        }
+        mode = (mode == 'text') && 0x4000 || 0x8000;
+        var prev_mode = lib._setmode(lib._fileno(file), mode);
+        if( prev_mode == -1 ) {
+            return null, errno();
+        }
+        return true, (prev_mode == 0x4000) && 'text' || 'binary';
+    }
+
+    var function check_is_dir(path) {
+        return _M.attributes(path, 'mode') == 'directory' && 1 || 0;
+    }
+
+    function _M.link(old, new) {
+        var is_dir = check_is_dir(old);
+        if( lib.CreateSymbolicLinkW(
+                wchar_t(new),
+                wchar_t(old), is_dir) != 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    var findfirst;
+    var findnext;
+    if( IS_64_BIT ) {
+        ffi.cdef([=[
+            typedef struct _finddata64_t {
+                uint64_t  attrib;
+                uint64_t  time_create;
+                uint64_t  time_access;
+                uint64_t  time_write;
+                uint64_t  size;
+                char      name[]=] .. MAXPATH ..[=[];
+            } _finddata_t;
+            int _findfirst64(const char *filespec, _finddata_t *fileinfo);
+            int _findnext64(int handle, _finddata_t *fileinfo);
+            int _findclose(int handle);
+        ]=]);
+        findfirst = lib._findfirst64;
+        findnext = lib._findnext64;
+    } else {
+        ffi.cdef([=[
+            typedef struct _finddata32_t {
+                uint32_t  attrib;
+                uint32_t  time_create;
+                uint32_t  time_access;
+                uint32_t  time_write;
+                uint32_t  size;
+                char      name[]=] .. MAXPATH ..[=[];
+            } _finddata_t;
+            int _findfirst32(const char* filespec, _finddata_t* fileinfo);
+            int _findnext32(int handle, _finddata_t *fileinfo);
+            int _findclose(int handle);
+        ]=]);
+        findfirst = lib._findfirst32;
+        findnext = lib._findnext32;
+    }
+
+    var function findclose(dentry) {
+        if( dentry && dentry.handle != -1 ) {
+            lib._findclose(dentry.handle);
+            dentry.handle = -1;
+        }
+    }
+
+    var dir_type = ffi.metatype("struct {int handle;}", {
+        __gc = findclose
+    });
+
+    var function close(dir) {
+        findclose(dir._dentry);
+        dir.closed = true;
+    }
+
+    var function iterator(dir) {
+        if( dir.closed != false ) { error("closed directory"); }
+        var entry = ffi_new("_finddata_t");
+        if( ! dir._dentry ) {
+            dir._dentry = ffi_new(dir_type);
+            dir._dentry.handle = findfirst(dir._pattern, entry);
+            if( dir._dentry.handle == -1 ) {
+                dir.closed = true;
+                return null, errno();
+            }
+            return ffi_str(entry.name);
+        }
+
+        if( findnext(dir._dentry.handle, entry) == 0 ) {
+            return ffi_str(entry.name);
+        }
+        close(dir);
+        return null;
+    }
+
+    var dirmeta = {__index = {
+        next = iterator,
+        close = close,
+    }};
+
+    function _M.dir(path) {
+        if( #path > MAXPATH - 2 ) {
+            error('path too long: ' .. path);
+        }
+        var dir_obj = setmetatable({
+            _pattern = path..'/*',
+            closed  = false,
+        }, dirmeta);
+        return iterator, dir_obj;
+    }
+
+    ffi.cdef([=[
+        int _fileno(struct FILE *stream);
+        int fseek(struct FILE *stream, long offset, int origin);
+        long ftell(struct FILE *stream);
+        int _locking(int fd, int mode, long nbytes);
+    ]=]);
+
+    var mode_ltype_map = {
+        r = 2, // LK_NBLCK
+        w = 2, // LK_NBLCK
+        u = 0, // LK_UNLCK
+    };
+    var SEEK_SET = 0;
+    var SEEK_END = 2;
+
+    var function lock(fh, mode, start, len) {
+        var lkmode = mode_ltype_map[mode];
+        if( ! len || len <= 0 ) {
+            if( lib.fseek(fh, 0, SEEK_END) != 0 ) {
+                return null, errno();
+            }
+            len = lib.ftell(fh);
+        }
+        if( ! start || start <= 0 ) {
+            start = 0;
+        }
+        if( lib.fseek(fh, start, SEEK_SET) != 0 ) {
+            return null, errno();
+        }
+        var fd = lib._fileno(fh);
+        if( lib._locking(fd, lkmode, len) == -1 ) {
+            return null, errno();
+        }
+        return true;
+    }
+
+    function _M.lock(filehandle, mode, start, length) {
+        if( mode != 'r' && mode != 'w' ) {
+            error("lock: invalid mode");
+        }
+        if( io_type(filehandle) != 'file' ) {
+            error("lock: invalid file");
+        }
+        var ok, err = lock(filehandle, mode, start, length);
+        if( ! ok ) {
+            return null, err;
+        }
+        return true;
+    }
+
+    function _M.unlock(filehandle, start, length) {
+        if( io_type(filehandle) != 'file' ) {
+            error("unlock: invalid file");
+        }
+        var ok, err = lock(filehandle, 'u', start, length);
+        if( ! ok ) {
+            return null, err;
+        }
+        return true;
+    }
+} else {
+    ffi.cdef([=[
+        char *getcwd(char *buf, size_t size);
+        int chdir(const char *path);
+        int rmdir(const char *pathname);
+        typedef unsigned int mode_t;
+        int mkdir(const char *pathname, mode_t mode);
+        typedef size_t time_t;
+        struct utimebuf {
+            time_t actime;
+            time_t modtime;
+        };
+        int utime(const char *file, const struct utimebuf *times);
+        int link(const char *oldpath, const char *newpath);
+        int symlink(const char *oldpath, const char *newpath);
+    ]=]);
+
+    function _M.chdir(path) {
+        if( lib.chdir(path) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.currentdir() {
+        var size = MAXPATH;
+        while( true ) {
+            var buf = ffi_new("char[?]", size);
+            if( lib.getcwd(buf, size) != null ) {
+                return ffi_str(buf);
+            }
+            var err = errno();
+            if( err != ERANGE ) {
+                return null, err;
+            }
+            size *=   2;
+        }
+    }
+
+    function _M.mkdir(path, mode) {
+        if( lib.mkdir(path, mode || 509) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.rmdir(path) {
+        if( lib.rmdir(path) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.touch(path, actime, modtime) {
+        var buf;
+
+        if( type(actime) == "number" ) {
+            modtime = modtime || actime;
+            buf = ffi_new("struct utimebuf");
+            buf.actime  = actime;
+            buf.modtime = modtime;
+        }
+
+        var p = ffi_new("unsigned char[?]", #path + 1, path);
+        if( lib.utime(p, buf) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    function _M.setmode() {
+        return true, "binary";
+    }
+
+    function _M.link(old, new, symlink) {
+        var f = symlink && lib.symlink || lib.link;
+        if( f(old, new) == 0 ) {
+            return true;
+        }
+        return null, errno();
+    }
+
+    var dirent_def;
+    if( OS == 'OSX' || OS == 'BSD' ) {
+        dirent_def = [=[
+            /* _DARWIN_FEATURE_64_BIT_INODE is NOT defined here? */
+            struct dirent {
+                uint32_t d_ino;
+                uint16_t d_reclen;
+                uint8_t  d_type;
+                uint8_t  d_namlen;
+                char d_name[256];
+            };
+        ]=];
+    } else {
+        dirent_def = [=[
+            struct dirent {
+                int64_t           d_ino;
+                size_t           d_off;
+                unsigned short  d_reclen;
+                unsigned char   d_type;
+                char            d_name[256];
+            };
+        ]=];
+    }
+    ffi.cdef(dirent_def .. [=[
+        typedef struct  __dirstream DIR;
+        DIR *opendir(const char *name);
+        struct dirent *readdir(DIR *dirp);
+        int closedir(DIR *dirp);
+    ]=]);
+
+    var function close(dir) {
+        if( dir._dentry != null ) {
+            lib.closedir(dir._dentry);
+            dir._dentry = null;
+            dir.closed = true;
+        }
+    }
+
+    var function iterator(dir) {
+        if( dir.closed != false ) { error("closed directory"); }
+
+        var entry = lib.readdir(dir._dentry);
+        if( entry != null ) {
+            return ffi_str(entry.d_name);
+        } else {
+            close(dir);
+            return null;
+        }
+    }
+
+    var dir_obj_type = ffi.metatype([=[
+        struct {
+            DIR *_dentry;
+            bool closed;
+        }
+    ]=],
+    {__index = {
+        next = iterator,
+        close = close,
+    }, __gc = close
+    });
+
+    function _M.dir(path) {
+        var dentry = lib.opendir(path);
+        if( dentry == null ) {
+            error("cannot open "..path.." : "..errno());
+        }
+        var dir_obj = ffi_new(dir_obj_type);
+        dir_obj._dentry = dentry;
+        dir_obj.closed = false;
+        return iterator, dir_obj;
+    }
+
+    var SEEK_SET = 0;
+    var F_SETLK = (OS == 'Linux') && 6 || 8;
+    var mode_ltype_map;
+    var flock_def;
+    if( OS == 'Linux' ) {
+        flock_def = [=[
+            struct flock {
+                short int l_type;
+                short int l_whence;
+                int64_t l_start;
+                int64_t l_len;
+                int l_pid;
+            };
+        ]=];
+        mode_ltype_map = {
+            r = 0, // F_RDLCK
+            w = 1, // F_WRLCK
+            u = 2, // F_UNLCK
+        };
+    } else {
+        flock_def = [=[
+            struct flock {
+                int64_t	l_start;
+                int64_t	l_len;
+                int32_t	l_pid;
+                short	l_type;
+                short	l_whence;
+            };
+        ]=];
+        mode_ltype_map = {
+            r = 1, // F_RDLCK
+            u = 2, // F_UNLCK
+            w = 3, // F_WRLCK
+        };
+    }
+
+    ffi.cdef(flock_def..[=[
+        int fileno(struct FILE *stream);
+        int fcntl(int fd, int cmd, ... /* arg */ );
+        int unlink(const char *path);
+    ]=]);
+
+    var function lock(fd, mode, start, len) {
+        var flock = ffi_new('struct flock');
+        flock.l_type = mode_ltype_map[mode];
+        flock.l_whence = SEEK_SET;
+        flock.l_start = start || 0;
+        flock.l_len = len || 0;
+        if( lib.fcntl(fd, F_SETLK, flock) == -1 ) {
+            return null, errno();
+        }
+        return true;
+    }
+
+    function _M.lock(filehandle, mode, start, length) {
+        if( mode != 'r' && mode != 'w' ) {
+            error("lock: invalid mode");
+        }
+        if( io_type(filehandle) != 'file' ) {
+            error("lock: invalid file");
+        }
+        var fd = lib.fileno(filehandle);
+        var ok, err = lock(fd, mode, start, length);
+        if( ! ok ) {
+            return null, err;
+        }
+        return true;
+    }
+
+    function _M.unlock(filehandle, start, length) {
+        if( io_type(filehandle) != 'file' ) {
+            error("unlock: invalid file");
+        }
+        var fd = lib.fileno(filehandle);
+        var ok, err = lock(fd, 'u', start, length);
+        if( ! ok ) {
+            return null, err;
+        }
+        return true;
+    }
+}
+
+// lock related
+var dir_lock_struct;
+var create_lockfile;
+var delete_lockfile;
+
+if( OS == 'Windows' ) {
+    ffi.cdef([=[
+        typedef const wchar_t* LPCWSTR;
+        typedef struct _SECURITY_ATTRIBUTES {
+            DWORD nLength;
+            void *lpSecurityDescriptor;
+            int bInheritHandle;
+        } SECURITY_ATTRIBUTES;
+        typedef SECURITY_ATTRIBUTES *LPSECURITY_ATTRIBUTES;
+        void *CreateFileW(
+            LPCWSTR lpFileName,
+            DWORD dwDesiredAccess,
+            DWORD dwShareMode,
+            LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+            DWORD dwCreationDisposition,
+            DWORD dwFlagsAndAttributes,
+            void *hTemplateFile
+        );
+
+        int CloseHandle(void *hObject);
+    ]=]);
+
+    var GENERIC_WRITE = 0x40000000;
+    var CREATE_NEW = 1;
+    var FILE_NORMAL_DELETE_ON_CLOSE = 0x04000080;
+
+    dir_lock_struct = 'struct {void *lockname;}';
+
+    function create_lockfile(dir_lock, _, lockname) {
+        lockname = wchar_t(lockname);
+        dir_lock.lockname = lib.CreateFileW(lockname, GENERIC_WRITE, 0, null, CREATE_NEW,
+                FILE_NORMAL_DELETE_ON_CLOSE, null);
+        return dir_lock.lockname != ffi_cast('void*', -1);
+    }
+
+    function delete_lockfile(dir_lock) {
+        return lib.CloseHandle(dir_lock.lockname);
+    }
+} else {
+    dir_lock_struct = 'struct {char *lockname;}';
+    function create_lockfile(dir_lock, path, lockname) {
+        dir_lock.lockname = ffi_new('char[?]', #lockname + 1, lockname);
+        return lib.symlink(path, lockname) == 0;
+    }
+
+    function delete_lockfile(dir_lock) {
+        return lib.unlink(dir_lock.lockname);
+    }
+}
+
+var function unlock_dir(dir_lock) {
+    if( dir_lock.lockname != null ) {
+        dir_lock->delete_lockfile();
+        dir_lock.lockname = null;
+    }
+    return true;
+}
+
+var dir_lock_type = ffi.metatype(dir_lock_struct,
+    {__gc = unlock_dir,
+    __index = {
+        free = unlock_dir,
+        create_lockfile = create_lockfile,
+        delete_lockfile = delete_lockfile,
+    }}
+);
+
+function _M.lock_dir(path, _) {
+    // It's interesting that the lock_dir from vanilla lfs just ignores second paramter.
+    // So, I follow this behavior too :)
+    var dir_lock = ffi_new(dir_lock_type);
+    var lockname = path .. '/lockfile.lfs';
+    if( ! dir_lock->create_lockfile(path, lockname) ) {
+        return null, errno();
+    }
+    return dir_lock;
+}
+
+// stat related
+var stat_func;
+var lstat_func;
+if( OS == 'Linux' ) {
+    ffi.cdef([=[
+        long syscall(int number, ...);
+    ]=]);
+    var ARCH = ffi.arch;
+    // Taken from justincormack/ljsyscall
+    var stat_syscall_num;
+    var lstat_syscall_num;
+    if( ARCH == 'x64' ) {
+        ffi.cdef([=[
+            typedef struct {
+                unsigned long   st_dev;
+                unsigned long   st_ino;
+                unsigned long   st_nlink;
+                unsigned int    st_mode;
+                unsigned int    st_uid;
+                unsigned int    st_gid;
+                unsigned int    __pad0;
+                unsigned long   st_rdev;
+                long            st_size;
+                long            st_blksize;
+                long            st_blocks;
+                unsigned long   st_atime;
+                unsigned long   st_atime_nsec;
+                unsigned long   st_mtime;
+                unsigned long   st_mtime_nsec;
+                unsigned long   st_ctime;
+                unsigned long   st_ctime_nsec;
+                long            __unused[3];
+            } stat;
+        ]=]);
+        stat_syscall_num = 4;
+        lstat_syscall_num = 6;
+    } else if( ARCH == 'x86' ) {
+        ffi.cdef([=[
+            typedef struct {
+                unsigned long long      st_dev;
+                unsigned char   __pad0[4];
+                unsigned long   __st_ino;
+                unsigned int    st_mode;
+                unsigned int    st_nlink;
+                unsigned long   st_uid;
+                unsigned long   st_gid;
+                unsigned long long      st_rdev;
+                unsigned char   __pad3[4];
+                long long       st_size;
+                unsigned long   st_blksize;
+                unsigned long long      st_blocks;
+                unsigned long   st_atime;
+                unsigned long   st_atime_nsec;
+                unsigned long   st_mtime;
+                unsigned int    st_mtime_nsec;
+                unsigned long   st_ctime;
+                unsigned long   st_ctime_nsec;
+                unsigned long long      st_ino;
+            } stat;
+        ]=]);
+        stat_syscall_num = IS_64_BIT && 106 || 195;
+        lstat_syscall_num = IS_64_BIT && 107 || 196;
+    } else if( ARCH == 'arm' ) {
+        if( IS_64_BIT ) {
+            ffi.cdef([=[
+                typedef struct {
+                    unsigned long   st_dev;
+                    unsigned long   st_ino;
+                    unsigned int    st_mode;
+                    unsigned int    st_nlink;
+                    unsigned int    st_uid;
+                    unsigned int    st_gid;
+                    unsigned long   st_rdev;
+                    unsigned long   __pad1;
+                    long            st_size;
+                    int             st_blksize;
+                    int             __pad2;
+                    long            st_blocks;
+                    long            st_atime;
+                    unsigned long   st_atime_nsec;
+                    long            st_mtime;
+                    unsigned long   st_mtime_nsec;
+                    long            st_ctime;
+                    unsigned long   st_ctime_nsec;
+                    unsigned int    __unused4;
+                    unsigned int    __unused5;
+                } stat;
+            ]=]);
+            stat_syscall_num = 106;
+            lstat_syscall_num = 107;
+        } else {
+            ffi.cdef([=[
+                typedef struct {
+                    unsigned long long      st_dev;
+                    unsigned char   __pad0[4];
+                    unsigned long   __st_ino;
+                    unsigned int    st_mode;
+                    unsigned int    st_nlink;
+                    unsigned long   st_uid;
+                    unsigned long   st_gid;
+                    unsigned long long      st_rdev;
+                    unsigned char   __pad3[4];
+                    long long       st_size;
+                    unsigned long   st_blksize;
+                    unsigned long long      st_blocks;
+                    unsigned long   st_atime;
+                    unsigned long   st_atime_nsec;
+                    unsigned long   st_mtime;
+                    unsigned int    st_mtime_nsec;
+                    unsigned long   st_ctime;
+                    unsigned long   st_ctime_nsec;
+                    unsigned long long      st_ino;
+                } stat;
+            ]=]);
+            stat_syscall_num = 195;
+            lstat_syscall_num = 196;
+        }
+    } else if( ARCH == 'ppc' || ARCH == 'ppcspe' ) {
+        ffi.cdef([=[
+            typedef struct {
+                unsigned long long st_dev;
+                unsigned long long st_ino;
+                unsigned int    st_mode;
+                unsigned int    st_nlink;
+                unsigned int    st_uid;
+                unsigned int    st_gid;
+                unsigned long long st_rdev;
+                unsigned long long __pad1;
+                long long       st_size;
+                int             st_blksize;
+                int             __pad2;
+                long long       st_blocks;
+                int             st_atime;
+                unsigned int    st_atime_nsec;
+                int             st_mtime;
+                unsigned int    st_mtime_nsec;
+                int             st_ctime;
+                unsigned int    st_ctime_nsec;
+                unsigned int    __unused4;
+                unsigned int    __unused5;
+            } stat;
+        ]=]);
+        stat_syscall_num = IS_64_BIT && 106 || 195;
+        lstat_syscall_num = IS_64_BIT && 107 || 196;
+    } else if( ARCH == 'mips' || ARCH == 'mipsel' ) {
+        ffi.cdef([=[
+            typedef struct {
+                unsigned long   st_dev;
+                unsigned long   __st_pad0[3];
+                unsigned long long      st_ino;
+                mode_t          st_mode;
+                nlink_t         st_nlink;
+                uid_t           st_uid;
+                gid_t           st_gid;
+                unsigned long   st_rdev;
+                unsigned long   __st_pad1[3];
+                long long       st_size;
+                time_t          st_atime;
+                unsigned long   st_atime_nsec;
+                time_t          st_mtime;
+                unsigned long   st_mtime_nsec;
+                time_t          st_ctime;
+                unsigned long   st_ctime_nsec;
+                unsigned long   st_blksize;
+                unsigned long   __st_pad2;
+                long long       st_blocks;
+                long __st_padding4[14];
+            } stat;
+        ]=]);
+        stat_syscall_num = IS_64_BIT && 4106 || 4213;
+        lstat_syscall_num = IS_64_BIT && 4107 || 4214;
+    }
+
+    if( stat_syscall_num ) {
+        stat_func = function(filepath, buf) {
+            return lib.syscall(stat_syscall_num, filepath, buf);
+        };
+        lstat_func = function(filepath, buf) {
+            return lib.syscall(lstat_syscall_num, filepath, buf);
+        };
+    } else {
+        ffi.cdef('typedef struct {} stat;');
+        stat_func = function() { error("TODO support other Linux architectures"); };
+        lstat_func = stat_func;
+    }
+} else if( OS == 'Windows' ) {
+    ffi.cdef([=[
+        typedef struct {
+            unsigned int        st_dev;
+            unsigned short      st_ino;
+            unsigned short      st_mode;
+            short               st_nlink;
+            short               st_uid;
+            short               st_gid;
+            unsigned int        st_rdev;
+            int64_t             st_size;
+            long long           st_atime;
+            long long           st_mtime;
+            long long           st_ctime;
+        } stat;
+        int _stat64(const char *path, stat *buffer);
+    ]=]);
+
+    stat_func = lib._stat64;
+    lstat_func = stat_func;
+} else if( OS == 'OSX' ) {
+    ffi.cdef([=[
+        struct timespec {
+            time_t tv_sec;
+            long tv_nsec;
+        };
+        typedef struct {
+            uint32_t           st_dev;
+            uint16_t          st_mode;
+            uint16_t         st_nlink;
+            uint64_t         st_ino;
+            uint32_t           st_uid;
+            uint32_t           st_gid;
+            uint32_t           st_rdev;
+            struct timespec st_atimespec;
+            struct timespec st_mtimespec;
+            struct timespec st_ctimespec;
+            struct timespec st_birthtimespec;
+            int64_t           st_size;
+            int64_t        st_blocks;
+            int32_t       st_blksize;
+            uint32_t        st_flags;
+            uint32_t        st_gen;
+            int32_t         st_lspare;
+            int64_t         st_qspare[2];
+        } stat;
+        int stat64(const char *path, stat *buf);
+        int lstat64(const char *path, stat *buf);
+    ]=]);
+    stat_func = lib.stat64;
+    lstat_func = lib.lstat64;
+} else {
+    ffi.cdef('typedef struct {} stat;');
+    stat_func = function() { error('TODO: support other posix system'); };
+    lstat_func = stat_func;
+}
+
+var STAT = {
+    FMT   = 0xF000,
+    FSOCK = 0xC000,
+    FLNK  = 0xA000,
+    FREG  = 0x8000,
+    FBLK  = 0x6000,
+    FDIR  = 0x4000,
+    FCHR  = 0x2000,
+    FIFO  = 0x1000,
+};
+
+var ftype_name_map = {
+    [STAT.FREG]  = 'file',
+    [STAT.FDIR]  = 'directory',
+    [STAT.FLNK]  = 'link',
+    [STAT.FSOCK] = 'socket',
+    [STAT.FCHR]  = 'char device',
+    [STAT.FBLK]  = "block device",
+    [STAT.FIFO]  = "named pipe",
+};
+
+var function mode_to_ftype(mode) {
+    var ftype = band(mode, STAT.FMT);
+    return ftype_name_map[ftype] || 'other';
+}
+
+var function mode_to_perm(mode) {
+    var perm_bits = band(mode, tonumber(777, 8));
+    var perm = new_tab(9, 0);
+    var i = 9;
+    while( i > 0 ) {
+        var perm_bit = band(perm_bits, 7);
+        perm[i] = (band(perm_bit, 1) > 0 && 'x' || '-');
+        perm[i-1] = (band(perm_bit, 2) > 0 && 'w' || '-');
+        perm[i-2] = (band(perm_bit, 4) > 0 && 'r' || '-');
+        i -=   3;
+        perm_bits = rshift(perm_bits, 3);
+    }
+    return concat(perm);
+}
+
+var function time_or_timespec(time, timespec) {
+    var t = tonumber(time);
+    if( ! t && timespec ) {
+        t = tonumber(timespec.tv_sec);
+    }
+    return t;
+}
+
+var attr_handlers = {
+    access = function(st) { return time_or_timespec(st.st_atime, st.st_atimespec); },
+    blksize = function(st) { return tonumber(st.st_blksize); },
+    blocks = function(st) { return tonumber(st.st_blocks); },
+    change = function(st) { return time_or_timespec(st.st_ctime, st.st_ctimespec); },
+    dev = function(st) { return tonumber(st.st_dev); },
+    gid = function(st) { return tonumber(st.st_gid); },
+    ino = function(st) { return tonumber(st.st_ino); },
+    mode = function(st) { return mode_to_ftype(st.st_mode); },
+    modification = function(st) { return time_or_timespec(st.st_mtime, st.st_mtimespec); },
+    nlink = function(st) { return tonumber(st.st_nlink); },
+    permissions = function(st) { return mode_to_perm(st.st_mode); },
+    rdev = function(st) { return tonumber(st.st_rdev); },
+    size = function(st) { return tonumber(st.st_size); },
+    uid = function(st) { return tonumber(st.st_uid); },
+};
+
+// Add target field for symlinkattributes, which is the absolute path of linked target
+var get_link_target_path;
+if( OS == 'Windows' ) {
+    function get_link_target_path() {
+        return null;
+    }
+} else {
+    ffi.cdef('unsigned long readlink(const char *path, char *buf, size_t bufsize);');
+    function get_link_target_path(link_path) {
+        var size = MAXPATH;
+        while( true ) {
+            var buf = ffi_new('char[?]', size);
+            var read = lib.readlink(link_path, buf, size);
+            if( read == -1 ) {
+                return null, errno();
+            }
+            if( read < size ) {
+                return ffi_str(buf);
+            }
+            size *=   2;
+        }
+    }
+}
+
+var mt = {
+    __index = function(this, attr_name) {
+        var func = attr_handlers[attr_name];
+        return func && func(this);
+    }
+};
+var stat_type = ffi.metatype('stat', mt);
+
+var function attributes(filepath, attr, follow_symlink) {
+    var buf = ffi_new(stat_type);
+    var func = follow_symlink && stat_func || lstat_func;
+    if( func(filepath, buf) == -1 ) {
+        return null, errno();
+    }
+
+    var atype = type(attr);
+    if( atype == 'string' ) {
+        var value;
+        if( attr == 'target' && ! follow_symlink ) {
+            value = get_link_target_path(filepath);
+        } else {
+            value = buf[attr];
+        }
+        if( value == null ) {
+            error("invalid attribute name '" .. attr .. "'");
+        }
+        return value;
+    } else {
+        var tab = (atype == 'table') && attr || {};
+        for( k, _ in pairs(attr_handlers) ) {
+            tab[k] = buf[k];
+        }
+        if( ! follow_symlink ) {
+            tab.target = get_link_target_path(filepath);
+        }
+        return tab;
+    }
+}
+
+function _M.attributes(filepath, attr) {
+    return attributes(filepath, attr, true);
+}
+
+function _M.symlinkattributes(filepath, attr) {
+    return attributes(filepath, attr, false);
+}
+
+return _M;

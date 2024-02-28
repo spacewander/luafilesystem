@@ -1,0 +1,25 @@
+#!/usr/bin/env ljsjit
+var lfs = require('./lfs_ffi');
+
+var fh = io.open('temp.txt', 'r+');
+
+var start = os.clock();
+while( true ) {
+    var ok = lfs.lock(fh, 'w', 2, 7);
+    if( ok ) {
+        print('get lock');
+        break;
+    }
+    if( os.clock() - start > 5 ) {
+        print('ERROR: timeout');
+        return;
+    }
+}
+
+start = os.clock();
+while( os.clock() - start < 3  ) {
+}
+
+print('unlock');
+var _, err = lfs.unlock(fh);
+print(err);

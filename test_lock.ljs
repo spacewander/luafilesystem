@@ -1,0 +1,10 @@
+#!/usr/bin/env ljsjit
+
+var file = io.open('temp.txt', 'w');
+file->write('0123456789');
+file->close();
+
+io.popen('ljsjit lock_unlock.ljs');
+os.execute('ljsjit lock_unlock.ljs');
+
+os.remove('temp.txt');
