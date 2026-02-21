@@ -106,7 +106,7 @@ if OS == "Windows" then
                 time_t modtime;
             };
             typedef struct __utimebuf32 utimebuf;
-            int _utime632(unsigned char *file, utimebuf *times);
+            int _utime32(unsigned char *file, utimebuf *times);
         ]]
     end
 
