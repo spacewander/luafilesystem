@@ -1,0 +1,59 @@
+var base_folder = "../luafilesystem/";
+
+var cmd = "find " .. base_folder .. " -name '*.lua'";
+//var file_list = io.popen(cmd)->read("*a");
+//print(file_list);
+
+var function osExec(cmd)
+{
+	print(cmd);
+	io.stdout->flush();
+	os.execute(cmd);
+}
+
+var fname_re = base_folder->gsub("[.-]", "%%%1") .. "(.+)$";
+//print(fname_re);
+var fd = io.popen(cmd);
+for(line in fd->lines())
+{
+	//print(line);
+	var fname = line->match(fname_re);
+	//print(fname);
+	var fname_ljs = fname->replace(".lua", ".ljs");
+	
+	//cmd = "rm " .. fname;
+	//osExec(cmd);	continue;
+	
+	cmd = "lua2ljs " .. line .. " > " .. fname_ljs;
+	//osExec(cmd); continue;
+	
+	
+	//cmd = "bin/linux/x64/ljsjit-2.0.5 -b -l " .. fname_ljs .. " > /dev/null";
+	cmd = "ljsjit -b -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "bin/linux/x64/ljsc54 -p -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "bin/linux/x64/ljsc53 -p -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "/home/mingo/dev/lua/lua-5.2.4-ljs/src/ljsc -p -l " .. fname_ljs .. " > /dev/null";
+	//cmd = "ljsc -p -l " .. fname_ljs .. " > /dev/null";
+	osExec(cmd);	continue;
+
+	cmd = "grep -H -n -b \"'nil'\" " .. fname_ljs;
+	//cmd = "grep -H -n -b '\"nil\"' " .. fname_ljs;
+	//cmd = "grep -H -n -b '/openresty/' " .. fname_ljs;
+	//cmd = "grep -H -n -b 'local' " .. fname_ljs;
+	//cmd = "grep -H -n -b 'then' " .. fname_ljs;
+	//cmd = "grep -H -n -b '\\?lua' " .. fname_ljs;
+	//cmd = "grep -H -n -b '\"lua\"' " .. fname_ljs;
+	//cmd = "grep -H -n -b \"'lua'\" " .. fname_ljs;
+	//cmd = "grep -H -n -b '\\.lua' " .. fname_ljs;
+	osExec(cmd); continue;
+
+	var fname_ljs_base = fname_ljs .. ".base";
+	cmd = "lua2ljs " .. line .. " > " .. fname_ljs_base;
+	osExec(cmd);
+	cmd =   "echo " .. fname_ljs .. ";diff " .. fname_ljs_base .. " " .. fname_ljs;
+	osExec(cmd);
+	cmd =   "rm " .. fname_ljs_base;
+	osExec(cmd);
+}
+
+fd->close();
